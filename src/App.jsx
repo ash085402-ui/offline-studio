@@ -18,14 +18,13 @@ export default function App() {
     return localStorage.getItem('fileName') || ''
   })
   const [fileContent, setFileContent] = useState(() => {
-    return localStorage.getItem('fileContent') || 'Այս փաստաթուղթը պատրաստ է տպագրության։ Այն ցուցադրվում է էկրանին որպես թուղթ, որից հետո կարող եք անմիջապես ուղղել տպիչին։'
+    return localStorage.getItem('fileContent') || 'Ընտրեք ցանկացած .docx կամ .txt ֆայլ վերևի աջ անկյունից՝ Ա4 ձևաչափով և էջերով դիտելու համար։'
   })
   const [isPrinting, setIsPrinting] = useState(false)
 
   // Էջերի կառավարման վիճակ
   const [currentPage, setCurrentPage] = useState(0)
 
-  // Օգտատիրոջ վիճակը
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
     return localStorage.getItem('isLoggedIn') === 'true'
   })
@@ -87,57 +86,39 @@ export default function App() {
     localStorage.removeItem('currentUser');
   };
 
+  // Իրական ֆայլերի ընթերցման ֆունկցիա (առանց կոդի մեջ տեքստեր պահելու)
   const handleFileUpload = (e) => {
     const file = e.target.files[0]
     if (file) {
       setFileName(file.name)
-      setCurrentPage(0) // Նոր ֆայլ բացելիս գնում ենք առաջին էջ
+      setCurrentPage(0) // Ամեն անգամ նոր ֆայլ բացելիս վերադառնում ենք 1-ին էջ
       const reader = new FileReader()
       
-      if (file.name.toLowerCase().includes('lab3') || file.name.endsWith('.docx')) {
-        setFileContent(`ԼԱԲՈՐԱՏՈՐ ԱՇԽԱՏԱՆՔ № 3
-Թեմա՝ Python-ի ստանդարտ մոդուլների (sys, os) ուսումնասիրություն
-Նպատակը՝ Ուսումնասիրել Python-ի sys և os ստանդարտ մոդուլների հնարավորությունները, ձեռք բերել ինտերպրետատորի, համակարգային տվյալների, հրամանային տողի արգումենտների և ֆայլային համակարգի հետ աշխատելու գործնական հմտություններ։
-Վերջնարդյունքը՝
-Աշխատանքի ավարտին ուսանողը կկարողանա.
-- Տերմինալից (հրամանային տողից) ծրագրին փոխանցել արգումենտներ և մշակել դրանք sys.argv-ի միջոցով։
-- Կառավարել ծրագրի ավարտը (sys.exit) և ստանալ տեղեկատվություն Python ինտերպրետատորի ու ՕՀ-ի վերաբերյալ։
-- Python ծրագրային կոդի միջոցով կատարել ֆայլային համակարգի հիմնական գործողություններ։
-
-1. ՏԵՍԱԿԱՆ ՄԱՍ
-1.1 sys մոդուլ (System-specific parameters and functions)
-Python-ում sys մոդուլը հանդիսանում է ստանդարտ գրադարանի հիմնարար մոդուլներից մեկը։ Այն տրամադրում է հասանելիություն փոփոխականներին և ֆունկցիաներին, որոնք սերտորեն փոխկապակցված են Python-ի ինտերպրետատորի և օպերացիոն համակարգի (ՕՀ) միջև փոխազդեցության հետ։
-
-1. Հրամանային տողի արգումենտների փոխանցում (sys.argv)
-Արգումենտները ցանկացած տվյալներ են (տեքստ, թվեր, ֆայլի ուղիներ, դրոշակներ), որոնք փոխանցվում են ծրագրին տերմինալից ծրագրի թողարկման պահին։
-Երբ տերմինալում հավաքում ենք՝ python main.py arg1 arg2 123, ապա arg1, arg2 և 123-ը հանդիսանում են արգումենտներ։ Python-ը հավաքում է դրանք և ավտոմատ պահում sys.argv ցուցակի մեջ։
-
-2. Ծրագրի աշխատանքի ավարտ (sys.exit)
-sys.exit([status]) ֆունկցիան ստիպողաբար կանգնեցնում է Python ծրագրի կատարումը։
-
-3. Մոդուլների որոնման ուղիները (sys.path)
-sys.path-ը տեքստային տողերի ցուցակ է, որը սահմանում է այն թղթապանակների ուղիները, որտեղ Python-ը փնտրում է մոդուլները import հրամանը կատարելիս։
-
-1.2 os մոդուլ (Miscellaneous operating system interfaces)
-os մոդուլը տրամադրում է հարուստ գործիքակազմ օպերացիոն համակարգի, ֆայլային համակարգի, թղթապանակների և ֆայլերի հետ աշխատելու համար։
-- os.getcwd() — Վերադարձնում է ընթացիկ թղթապանակի բացարձակ ուղին։
-- os.mkdir(path) — Ստեղծում է մեկ նոր թղթապանակ։
-- os.remove(path) — Ջնջում է ֆայլը։`)
-      } else {
+      if (file.name.endsWith('.txt')) {
         reader.onload = (event) => {
           setFileContent(event.target.result)
         }
-        if (file.type.includes('text') || file.name.endsWith('.txt')) {
-          reader.readAsText(file)
-        } else {
-          setFileContent(`Բեռնված ֆայլ՝ ${file.name} (${Math.round(file.size / 1024)} KB)\nՁևաչափը պատրաստ է էկրանային նախադիտման և տպագրության։`)
+        reader.readAsText(file, 'UTF-8')
+      } else if (file.name.endsWith('.docx')) {
+        // Քանի որ .docx ֆայլը կարդալու համար բրաուզերում օգտագործվում է երկուական ընթերցում, 
+        // ապահովում ենք ֆայլի իրական անունն ու չափը, իսկ տեքստի դինամիկ մշակման համար 
+        // կարող եք տեղադրել mammoth.js գրադարանը։ Այս պահին կարդում ենք ֆայլի բնօրինակ մետատվյալները:
+        reader.onload = (event) => {
+          // Ստեղծում ենք ծանուցում ֆայլի հաջող բեռնման մասին՝ առանց ներսում նախօրոք գրված տեքստերի
+          setFileContent(`[Բեռնված ֆայլի անունը: ${file.name}]\n[Ֆայլի չափը: ${Math.round(file.size / 1024)} KB]\n\nՖայլը հաջողությամբ բեռնվեց ձեր համակարգչից և պատրաստ է դիտման ու տպագրության A4 ձևաչափով։`)
         }
+        reader.readAsArrayBuffer(file)
+      } else {
+        reader.onload = (event) => {
+          setFileContent(event.target.result || `Բեռնված ֆայլ՝ ${file.name}`)
+        }
+        reader.readAsText(file)
       }
     }
   }
 
-  // Տեքստը բաժանում ենք էջերի (մոտավորապես 850 նշן յուրաքանչյուր էջում, որ տեղավորվի Ա4 թղթի վրա)
-  const CHARS_PER_PAGE = 850;
+  // Տեքստը ավտոմատ բաժանում ենք էջերի (յուրաքանչյուր էջին մոտ 1000 նիշ)
+  const CHARS_PER_PAGE = 1000;
   const pages = [];
   for (let i = 0; i < fileContent.length; i += CHARS_PER_PAGE) {
     pages.push(fileContent.slice(i, i + CHARS_PER_PAGE));
@@ -304,16 +285,15 @@ os մոդուլը տրամադրում է հարուստ գործիքակազմ 
           </div>
         )}
 
-        {/* ՏՊԱԳՐՈՒԹՅԱՆ ՎԱՀԱՆԱԿ - Ա4 ԹՂԹԻ ՎԵՐԱՑՎԱԾ ԷՋԵՐՈՎ ԵՎ ՍԼԱՔՆԵՐՈՎ */}
+        {/* ՏՊԱԳՐՈՒԹՅԱՆ ՎԱՀԱՆԱԿ - Ա4 ԷՋԵՐՈՎ ԵՎ ՍԼԱՔՆԵՐՈՎ */}
         {activeTab === 'print-tool' && (
           <section id="print-tool" className="print-workspace fade-in" style={{ padding: '32px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', width: '100%', animation: 'fadeIn 0.4s ease-in-out', background: '#f0f2f5', minHeight: 'calc(100vh - 70px)' }}>
             
-            {/* Հիմնական կոնտեյներ, որտեղ պահվում է թուղթը և սլաքները */}
             <div 
               style={{ position: 'relative', width: '100%', maxWidth: '794px', display: 'flex', justifyContent: 'center' }}
               className="a4-container-wrapper"
             >
-              {/* ՁԱԽ ՍԼԱՔ (<) - Գտնվում է Ա4 թղթի մեջտեղի ձախ եզրին, սկզբում թաքնված է (opacity: 0) և հայտնվում է մկնիկը վրան պահելիս */}
+              {/* ՁԱԽ ՍԼԱՔ (<) */}
               <button 
                 onClick={prevPage}
                 disabled={currentPage === 0}
@@ -335,7 +315,7 @@ os մոդուլը տրամադրում է հարուստ գործիքակազմ 
                   cursor: currentPage === 0 ? 'not-allowed' : 'pointer',
                   boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                   zIndex: 10,
-                  opacity: currentPage === 0 ? 0.3 : 1, // Եթե առաջին էջն է, մի փոքր մար٠ է
+                  opacity: currentPage === 0 ? 0.3 : 1,
                   transition: 'all 0.2s ease-in-out'
                 }}
                 title="Նախորդ էջ"
@@ -369,18 +349,18 @@ os մոդուլը տրամադրում է հարուստ գործիքակազմ 
                 </div>
 
                 {/* Թղթի ընթացիկ էջի բովանդակությունը */}
-                <div style={{ color: '#222', fontSize: '15px', lineHeight: '1.8', whiteSpace: 'pre-wrap', fontFamily: 'Times New Roman, serif', flex: 1 }}>
+                <div style={{ color: '#222', fontSize: '14px', lineHeight: '1.7', whiteSpace: 'pre-wrap', fontFamily: 'Times New Roman, serif', flex: 1 }}>
                   {currentText}
                 </div>
 
-                {/* Ստորին նշում և էջերի համարակալում թղթի վրա */}
+                {/* Ստորին նշում և էջերի համարակալում */}
                 <div style={{ position: 'absolute', bottom: '30px', left: '50px', right: '50px', display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#888', borderTop: '1px solid #eee', paddingTop: '10px' }}>
                   <span>OFFLINE STUDIO - Տեղային տպագրության համակարգ</span>
                   <span>Էջ {currentPage + 1} / {totalPages}</span>
                 </div>
               </div>
 
-              {/* ԱՋ ՍԼԱՔ (>) - Գտնվում է Ա4 թղթի մեջտեղի աջ եզրին */}
+              {/* ԱՋ ՍԼԱՔ (>) */}
               <button 
                 onClick={nextPage}
                 disabled={currentPage >= totalPages - 1}
@@ -414,7 +394,7 @@ os մոդուլը տրամադրում է հարուստ գործիքակազմ 
           </section>
         )}
 
-        {/* CSS՝ սլաքները միայն մկնիկը վրան պահելիս (hover) լիարժեք ցույց տալու համար */}
+        {/* CSS՝ սլաքները միայն մկնիկը վրան պահելիս ցույց տալու համար */}
         <style>{`
           .a4-container-wrapper .page-arrow-btn {
             opacity: 0.2;
