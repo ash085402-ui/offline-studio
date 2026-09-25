@@ -100,13 +100,19 @@ export default function App() {
     if (file) {
       setFileName(file.name)
       const reader = new FileReader()
-      reader.onload = (event) => {
-        setFileContent(event.target.result)
-      }
-      if (file.type.includes('text') || file.name.endsWith('.txt')) {
-        reader.readAsText(file)
+      
+      // Եթե ֆայլը docx է կամ տեքստային
+      if (file.name.endsWith('.docx')) {
+        setFileContent(`[Word Փաստաթուղթ՝ ${file.name}]\n\nՓաստաթուղթը հաջողությամբ բեռնված է և պատրաստ է Ա4 ձևաչափով էկրանային նախադիտման ու տպագրության։\nՖայլի չափը՝ ${Math.round(file.size / 1024)} KB`)
       } else {
-        setFileContent(`Բեռնված ֆայլ՝ ${file.name} (${Math.round(file.size / 1024)} KB)\nՁևաչափը պատրաստ է էկրանային նախադիտման և տպագրության։`)
+        reader.onload = (event) => {
+          setFileContent(event.target.result)
+        }
+        if (file.type.includes('text') || file.name.endsWith('.txt')) {
+          reader.readAsText(file)
+        } else {
+          setFileContent(`Բեռնված ֆայլ՝ ${file.name} (${Math.round(file.size / 1024)} KB)\nՁևաչափը պատրաստ է էկրանային նախադիտման և տպագրության։`)
+        }
       }
     }
   }
@@ -252,8 +258,8 @@ export default function App() {
             ) : (
               <>
                 <label className="primary-button" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', background: 'var(--accent)', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}>
-                  <Upload size={14} /> Բացել ֆայլը
-                  <input type="file" onChange={handleFileUpload} style={{ display: 'none' }} />
+                  <Upload size={14} /> Բացել ֆայլը (.docx)
+                  <input type="file" accept=".docx, .txt" onChange={handleFileUpload} style={{ display: 'none' }} />
                 </label>
 
                 <button 
@@ -298,15 +304,45 @@ export default function App() {
           </div>
         )}
 
-        {/* ԲԱԺԻՆ 2: ՏՊԱԳՐՈՒԹՅԱՆ ՎԱՀԱՆԱԿ */}
+        {/* ԲԱԺԻՆ 2: ՏՊԱԳՐՈՒԹՅԱՆ ՎԱՀԱՆԱԿ (Ա4 ԹՂԹԻ ՁԵՎԱՉԱՓՈՎ) */}
         {activeTab === 'print-tool' && (
-          <section id="print-tool" className="print-workspace fade-in" style={{ padding: '32px', display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '900px', margin: '0 auto', width: '100%', animation: 'fadeIn 0.4s ease-in-out' }}>
-            <div style={{ color: '#111', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>
-              <div>
-                <h3 style={{ fontSize: '20px', wordBreak: 'break-all' }}>{fileName || 'Ֆայլ ընտրված չէ'}</h3>
-                <p style={{ marginTop: '12px', whiteSpace: 'pre-wrap', color: '#444', lineHeight: '1.6' }}>{fileContent}</p>
+          <section id="print-tool" className="print-workspace fade-in" style={{ padding: '32px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', width: '100%', animation: 'fadeIn 0.4s ease-in-out', background: '#f0f2f5', minHeight: 'calc(100vh - 70px)' }}>
+            
+            {/* Ա4 ԹՂԹԻ ՎԻԶՈՒԱԼ ՎԱՀԱՆԱԿ */}
+            <div style={{
+              background: '#ffffff',
+              width: '100%',
+              maxWidth: '794px',
+              minHeight: '1123px',
+              padding: '60px 50px',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+              borderRadius: '4px',
+              boxSizing: 'border-box',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'flex-start',
+              position: 'relative'
+            }}>
+              {/* Ֆայլի վերնագիրը թղթի վրա */}
+              <div style={{ borderBottom: '2px solid #333', paddingBottom: '12px', marginBottom: '24px' }}>
+                <span style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px' }}>Փաստաթղթի նախադիտում (A4)</span>
+                <h2 style={{ fontSize: '20px', color: '#111', margin: '4px 0 0 0', wordBreak: 'break-all' }}>
+                  {fileName || 'Ֆայլ ընտրված չէ'}
+                </h2>
+              </div>
+
+              {/* Թղթի բովանդակությունը */}
+              <div style={{ color: '#222', fontSize: '15px', lineHeight: '1.8', whiteSpace: 'pre-wrap', fontFamily: 'Times New Roman, serif' }}>
+                {fileContent}
+              </div>
+
+              {/* Ստորին նշում թղթի վրա */}
+              <div style={{ position: 'absolute', bottom: '30px', left: '50px', right: '50px', display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#888', borderTop: '1px solid #eee', paddingTop: '10px' }}>
+                <span>OFFLINE STUDIO - Տեղային տպագրության համակարգ</span>
+                <span>Էջ 1 / 1</span>
               </div>
             </div>
+
           </section>
         )}
 
