@@ -5,19 +5,14 @@ import {
 } from 'lucide-react'
 import './App.css'
 import { useGoogleLogin, googleLogout } from '@react-oauth/google';
-import * as docx from 'docx-preview';
+import * as docxViewer from 'docx-preview';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('overview')
+  const [activeTab, setActiveTab] = useState('print-tool')
   const [menuOpen, setMenuOpen] = useState(false)
   const [fileName, setFileName] = useState('')
   
   const docContainerRef = useRef(null)
-  const allPagesRef = useRef([])
-
-  const [currentPage, setCurrentPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
-
   const [isPrinting, setIsPrinting] = useState(false)
   const [fileInputKey, setFileInputKey] = useState(Date.now());
 
@@ -26,7 +21,7 @@ export default function App() {
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false)
 
   // Տեքստային խմբագրիչի վիճակ
-  const [editorText, setEditorText] = useState('Այստեղ գրեք կամ խմբագրեք ձեր տեքստը Ռազմիկի պահանջներին համապատասխան...')
+  const [editorText, setEditorText] = useState('Այստեղ գրեք կամ խմբագրեք ձեր տեքստը...')
 
   // Տեղային բազայի և անվտանգության վիճակներ
   const [dbNotes, setDbNotes] = useState([])
@@ -37,7 +32,12 @@ export default function App() {
   const [enteredPin, setEnteredPin] = useState('')
   const [isLocked, setIsLocked] = useState(false)
 
-  // Տվյալների անվտանգ բեռնում localStorage-ից միայն բրաուզերում
+  const [extraSettings, setExtraSettings] = useState({
+    autoSave: true,
+    themeMode: 'light',
+    notifications: false
+  })
+
   useEffect(() => {
     const savedTab = localStorage.getItem('activeTab')
     if (savedTab) setActiveTab(savedTab)
@@ -50,11 +50,7 @@ export default function App() {
 
     const savedUser = localStorage.getItem('currentUser')
     if (savedUser) {
-      try {
-        setCurrentUser(JSON.parse(savedUser))
-      } catch (e) {
-        console.error(e)
-      }
+      try { setCurrentUser(JSON.parse(savedUser)) } catch (e) { console.error(e) }
     }
 
     const savedEditorText = localStorage.getItem('editorText')
@@ -62,11 +58,7 @@ export default function App() {
 
     const savedNotes = localStorage.getItem('offline_db_notes')
     if (savedNotes) {
-      try {
-        setDbNotes(JSON.parse(savedNotes))
-      } catch (e) {
-        console.error(e)
-      }
+      try { setDbNotes(JSON.parse(savedNotes)) } catch (e) { console.error(e) }
     }
 
     const savedPin = localStorage.getItem('app_security_pin')
@@ -74,12 +66,18 @@ export default function App() {
       setPinCode(savedPin)
       setIsLocked(true)
     }
+
+    const savedExtra = localStorage.getItem('extra_settings')
+    if (savedExtra) {
+      try { setExtraSettings(JSON.parse(savedExtra)) } catch (e) { console.error(e) }
+    }
   }, [])
 
   useEffect(() => { localStorage.setItem('activeTab', activeTab) }, [activeTab])
   useEffect(() => { localStorage.setItem('fileName', fileName) }, [fileName])
   useEffect(() => { localStorage.setItem('editorText', editorText) }, [editorText])
   useEffect(() => { localStorage.setItem('offline_db_notes', JSON.stringify(dbNotes)) }, [dbNotes])
+  useEffect(() => { localStorage.setItem('extra_settings', JSON.stringify(extraSettings)) }, [extraSettings])
 
   useEffect(() => {
     localStorage.setItem('isLoggedIn', isLoggedIn)
@@ -120,98 +118,34 @@ export default function App() {
     localStorage.removeItem('currentUser');
   };
 
-  const renderDocx = async (arrayBuffer) => {
-    if (!docContainerRef.current) return;
-    
-    try {
-      const tempContainer = document.createElement('div');
-      
-      await docx.renderAsync(arrayBuffer, tempContainer, null, {
-        inWrapper: true,
-        ignoreWidth: false,
-        ignoreHeight: false,
-        experimental: true,
-      });
-
-      let pages = Array.from(tempContainer.querySelectorAll('.docx-page'));
-      
-      if (pages.length === 0) {
-        pages = Array.from(tempContainer.querySelectorAll('section'));
-      }
-      
-      if (pages.length === 0) {
-        const wrapper = tempContainer.querySelector('.docx-wrapper') || tempContainer;
-        pages = Array.from(wrapper.children);
-      }
-
-      if (pages.length > 0) {
-        allPagesRef.current = pages;
-        setTotalPages(pages.length);
-        setCurrentPage(1);
-        displayPage(1, pages);
-      }
-    } catch (error) {
-      console.error('Սխալ docx-ի վիզուալիզացիայի ժամանակ:', error);
-      if (docContainerRef.current) {
-        docContainerRef.current.innerHTML = '<p style="color: red; padding: 20px;">Չհաջողվեց բացել ֆայլը docx-preview շարժիչով։</p>';
-      }
-    }
-  };
-
-  const displayPage = (pageNum, pages = allPagesRef.current) => {
-    if (!docContainerRef.current) return;
-    docContainerRef.current.innerHTML = '';
-    
-    const targetPage = pages[pageNum - 1];
-    if (targetPage) {
-      const clone = targetPage.cloneNode(true);
-      clone.style.display = 'block';
-      clone.style.width = '794px';
-      clone.style.minHeight = '1123px';
-      clone.style.margin = '0 auto';
-      clone.style.background = '#ffffff';
-      clone.style.boxSizing = 'border-box';
-      docContainerRef.current.appendChild(clone);
-    }
-  };
-
-  const handlePageChange = (newPage) => {
-    if (newPage >= 1 && newPage <= totalPages) {
-      setCurrentPage(newPage);
-      displayPage(newPage);
-    }
-  };
-
-  const handleFileUpload = (e) => {
+  // Օգտագործում ենք docx-preview գրադարանը Word ֆայլը կարդալու և էջ առ էջ ցուցադրելու համար
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0]
     if (!file) return;
 
     setFileName(file.name)
-    const reader = new FileReader()
     
-    if (file.name.endsWith('.docx') || file.name.endsWith('.DOCX')) {
-      reader.onload = async (event) => {
-        const arrayBuffer = event.target.result;
-        renderDocx(arrayBuffer);
-        setFileInputKey(Date.now());
-      };
-      reader.readAsArrayBuffer(file);
-    } else {
-      reader.onload = (event) => {
-        const text = event.target.result ? event.target.result : 'Ֆայլը դատարկ է';
-        if (docContainerRef.current) {
-          const p = document.createElement('div');
-          p.className = 'docx-page';
-          p.innerHTML = `<p>${text.replace(/\n/g, '</p><p>')}</p>`;
-          allPagesRef.current = [p];
-          setTotalPages(1);
-          setCurrentPage(1);
-          displayPage(1, [p]);
-        }
-        setFileInputKey(Date.now());
+    if (docContainerRef.current) {
+      docContainerRef.current.innerHTML = '<p style="text-align:center; padding: 40px; color: #666;">Բեռնվում և մշակվում է Word ֆայլը...</p>';
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        await docxViewer.renderAsync(arrayBuffer, docContainerRef.current, null, {
+          inWrapper: true,
+          ignoreWidth: false,
+          ignoreHeight: false,
+          breakPages: true,
+          ignoreLastRenderedPageBreak: false,
+          renderHeaders: true,
+          renderFooters: true,
+          renderFootnotes: true,
+          experimental: true,
+        });
+      } catch (error) {
+        console.error('Սխալ docx-preview աշխատանքում:', error);
+        docContainerRef.current.innerHTML = '<p style="text-align:center; padding: 40px; color: red;">Չհաջողվեց կարդալ ֆայլը։ Համոզվեք, որ սա վավեր .docx ֆայլ է։</p>';
       }
-      reader.readAsText(file, 'UTF-8')
     }
+    setFileInputKey(Date.now());
   }
 
   const handlePrint = () => {
@@ -232,11 +166,6 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const handleExportPdf = () => {
-    window.print();
-  };
-
-  // Տեղային բազային նոր գրառման ավելացում
   const handleAddNoteToDb = (e) => {
     e.preventDefault();
     if (!noteTitle.trim() || !noteContent.trim()) return;
@@ -253,12 +182,10 @@ export default function App() {
     setNoteContent('');
   };
 
-  // Գրառման ջնջում բազայից
   const handleDeleteNote = (id) => {
     setDbNotes(dbNotes.filter(n => n.id !== id));
   };
 
-  // PIN կոդի ստեղծում / փفلում
   const handleSetPin = (e) => {
     e.preventDefault();
     if (enteredPin.length < 4) {
@@ -289,7 +216,6 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      {/* Անվտանգության կողպեքի էկրան */}
       {isLocked && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.9)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#fff', padding: '30px', borderRadius: '12px', width: '320px', textAlign: 'center', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
@@ -324,7 +250,7 @@ export default function App() {
               <Sparkles size={16} /> <span>Գլխավոր էջ</span>
             </a>
             <a href="#print-tool" className={activeTab === 'print-tool' ? 'active-link' : ''} onClick={() => { setActiveTab('print-tool'); setMenuOpen(false); }}>
-              <Printer size={16} /> <span>Դիտում և Տպագրություն</span>
+              <Printer size={16} /> <span>Word Էջերի Դիտում և Տպում</span>
             </a>
             <a href="#editor-tool" className={activeTab === 'editor-tool' ? 'active-link' : ''} onClick={() => { setActiveTab('editor-tool'); setMenuOpen(false); }}>
               <Edit3 size={16} /> <span>Տեքստային խմբագրիչ</span>
@@ -332,13 +258,16 @@ export default function App() {
             <a href="#db-security" className={activeTab === 'db-security' ? 'active-link' : ''} onClick={() => { setActiveTab('db-security'); setMenuOpen(false); }}>
               <Database size={16} /> <span>Տեղային Բազա և Անվտանգություն</span>
             </a>
+            <a href="#extra-features" className={activeTab === 'extra-features' ? 'active-link' : ''} onClick={() => { setActiveTab('extra-features'); setMenuOpen(false); }}>
+              <Sparkles size={16} /> <span>Լրացուցիչ Կարգավորումներ</span>
+            </a>
           </nav>
         </div>
 
         <div className="side-foot">
           <div className="status-dot" />
           <span>Տեղային ռեժիմը ակտիվ է</span>
-          <span className="version">v1.8</span>
+          <span className="version">v2.1</span>
         </div>
       </aside>
 
@@ -346,8 +275,9 @@ export default function App() {
         <header className="topbar">
           <button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="Բացել"><Menu size={21} /></button>
           <span className="breadcrumb">
-            {activeTab === 'overview' ? 'ՆԱԽԱԳԾԻ ՓԱՍՏԱԹՈՒՂՂ ' : activeTab === 'print-tool' ? `ՏՊԱԳՐՄԱՆ ՎԱՀԱՆԱԿ (${fileName || 'Ֆայլ ընտրված չէ'})` : activeTab === 'editor-tool' ? 'ՏԵՔՍՏԱՅԻՆ ԽՄԲԱԳՐԻՉ ԵՎ PDF' : 'ՏԵՂԱՅԻՆ ԲԱԶԱ ԵՎ ԱՆՎՏԱՆԳՈՒԹՅՈՒՆ'}
+            {activeTab === 'overview' ? 'ՆԱԽԱԳԾԻ ՓԱՍՏԱԹՈՒՂՂ' : activeTab === 'print-tool' ? `WORD ՓԱՍՏԱԹՈՒՂԹ (${fileName || 'Ֆայլ ընտրված չէ'})` : activeTab === 'editor-tool' ? 'ՏԵՔՍՏԱՅԻՆ ԽՄԲԱԳՐԻՉ' : activeTab === 'db-security' ? 'ՏԵՂԱՅԻՆ ԲԱԶԱ ԵՎ ԱՆՎՏԱՆԳՈՒԹՅՈՒՆ' : 'ԿԱՐԳԱՎՈՐՈՒՄՆԵՐ'}
           </span>
+
           <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             {activeTab === 'overview' && (
               !isLoggedIn ? (
@@ -377,12 +307,12 @@ export default function App() {
             {activeTab === 'print-tool' && (
               <>
                 <label className="primary-button" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', background: 'var(--accent)', color: '#fff', borderRadius: '6px', fontSize: '13px' }}>
-                  <Upload size={14} /> Բացել ֆայլը (.docx)
-                  <input key={fileInputKey} type="file" accept=".docx, .txt" onChange={handleFileUpload} style={{ display: 'none' }} />
+                  <Upload size={14} /> Բացել Word ֆայլը (.docx)
+                  <input key={fileInputKey} type="file" accept=".docx" onChange={handleFileUpload} style={{ display: 'none' }} />
                 </label>
 
                 <button onClick={handlePrint} className="primary-button" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', background: '#111', color: '#fff', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px' }}>
-                  <Printer size={14} /> {isPrinting ? 'Նախապատրաստում...' : 'Տպել հիմա'}
+                  <Printer size={14} /> {isPrinting ? 'Նախապատրաստում...' : 'Տպել / PDF'}
                 </button>
               </>
             )}
@@ -394,9 +324,9 @@ export default function App() {
             <section id="overview" className="hero-section">
               <div className="hero-copy">
                 <span className="eyebrow accent">ՀԱՄԱԼՍԱՐԱՆԱԿԱՆ ՆԱԽԱԳԻԾ</span>
-                <h1>Մուլտիմեդիա և փաստաթղթերի<br /><em>ինքնավար</em> մշակման համակարգ</h1>
+                <h1>Word փաստաթղթերի <em>էջ առ էջ</em><br />դիտման համակարգ</h1>
                 <button className="primary-button" onClick={() => setActiveTab('print-tool')}>
-                  Բացել տպագրության վահանակը <ArrowUpRight size={17} />
+                  Բացել Word դիտման վահանակը <ArrowUpRight size={17} />
                 </button>
               </div>
             </section>
@@ -404,32 +334,10 @@ export default function App() {
         )}
 
         {activeTab === 'print-tool' && (
-          <section id="print-tool" className="print-workspace fade-in" style={{ padding: '30px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', background: '#cbd5e1', minHeight: 'calc(100vh - 70px)', boxSizing: 'border-box' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', background: '#ffffff', padding: '6px 16px', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-              <button 
-                onClick={() => handlePageChange(currentPage - 1)} 
-                disabled={currentPage <= 1}
-                style={{ background: '#f1f5f9', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                &lt;
-              </button>
-              <span style={{ fontSize: '14px', fontWeight: '500', color: '#333' }}>
-                Էջ {currentPage} / {totalPages}
-              </span>
-              <button 
-                onClick={() => handlePageChange(currentPage + 1)} 
-                disabled={currentPage >= totalPages}
-                style={{ background: '#f1f5f9', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                &gt;
-              </button>
-            </div>
-
-            <div style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
-              <div ref={docContainerRef} className="docx-viewer-container" style={{ width: '794px' }}>
-                <div style={{ background: '#fff', padding: '60px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', textAlign: 'center', width: '794px', margin: '0 auto' }}>
-                  <p style={{ color: '#555', fontSize: '15px' }}>Ընտրեք <b>.docx</b> ֆայլ՝ էջ առ էջ A4 ձևաչափով դիտելու համար։</p>
-                </div>
+          <section id="print-tool" className="print-workspace fade-in">
+            <div ref={docContainerRef} className="docx-pages-container">
+              <div className="empty-doc-page">
+                <p>Բեռնեք <b>.docx</b> ֆայլ՝ այն Word-ի նման առանձին A4 էջերով իրար տակ տեսնելու համար։</p>
               </div>
             </div>
           </section>
@@ -438,40 +346,15 @@ export default function App() {
         {activeTab === 'editor-tool' && (
           <section id="editor-tool" className="fade-in" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', background: '#f8fafc', minHeight: 'calc(100vh - 70px)', boxSizing: 'border-box' }}>
             <div style={{ width: '100%', maxWidth: '800px', background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
-              <h2 style={{ fontSize: '18px', marginBottom: '12px', color: '#1e293b' }}>Տեքստային փաստաթղթի ստեղծում և խմբագրում</h2>
-              <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-                Այս բաժինը թույլ է տալիս տեղային ռեժիմով խմբագրել տեքստը, պահպանել այն որպես ֆայլ կամ արտահանել PDF ձևաչափով՝ առանց ամպային սերվերների:
-              </p>
-              
+              <h2 style={{ fontSize: '18px', marginBottom: '12px', color: '#1e293b' }}>Տեքստային փաստաթղթի ստեղծում</h2>
               <textarea 
                 value={editorText}
                 onChange={(e) => setEditorText(e.target.value)}
-                style={{
-                  width: '100%',
-                  height: '350px',
-                  padding: '16px',
-                  fontSize: '14px',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: '8px',
-                  outline: 'none',
-                  resize: 'vertical',
-                  fontFamily: 'inherit',
-                  boxSizing: 'border-box'
-                }}
+                style={{ width: '100%', height: '350px', padding: '16px', fontSize: '14px', border: '1px solid #cbd5e1', borderRadius: '8px', outline: 'none', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
               />
-
               <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
-                <button 
-                  onClick={handleSaveAsTxt}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 18px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}
-                >
+                <button onClick={handleSaveAsTxt} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 18px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
                   <Download size={15} /> Պահպանել որպես .txt
-                </button>
-                <button 
-                  onClick={handleExportPdf}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 18px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}
-                >
-                  <FileText size={15} /> Արտահանել PDF
                 </button>
               </div>
             </div>
@@ -481,122 +364,170 @@ export default function App() {
         {activeTab === 'db-security' && (
           <section id="db-security" className="fade-in" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', background: '#f8fafc', minHeight: 'calc(100vh - 70px)', boxSizing: 'border-box' }}>
             <div style={{ width: '100%', maxWidth: '800px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              
-              {/* Տեղային Բազայի բաժին */}
               <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
                 <h2 style={{ fontSize: '18px', marginBottom: '8px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Database size={20} color="#0284c7" /> Տեղային տվյալների բազա (SQLite / Local Storage)
+                  <Database size={20} color="#0284c7" /> Տեղային տվյալների բազա
                 </h2>
-                <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-                  Կառավարեք ձեր գրառումները սարքի տեղային հիշողության մեջ առանց արտաքին սերվերների:
-                </p>
-
                 <form onSubmit={handleAddNoteToDb} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
-                  <input 
-                    type="text" 
-                    placeholder="Գրառման վերնագիր..." 
-                    value={noteTitle}
-                    onChange={(e) => setNoteTitle(e.target.value)}
-                    style={{ padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none' }}
-                  />
-                  <textarea 
-                    placeholder="Գրառման բովանդակություն..." 
-                    value={noteContent}
-                    onChange={(e) => setNoteContent(e.target.value)}
-                    style={{ padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', height: '80px', outline: 'none', resize: 'vertical' }}
-                  />
-                  <button type="submit" style={{ alignSelf: 'flex-start', padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '500', cursor: 'pointer', fontSize: '13px' }}>
-                    Ավելացնել բազայում
-                  </button>
+                  <input type="text" placeholder="Վերնագիր..." value={noteTitle} onChange={(e) => setNoteTitle(e.target.value)} style={{ padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                  <textarea placeholder="Բովանդակություն..." value={noteContent} onChange={(e) => setNoteContent(e.target.value)} style={{ padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', height: '80px' }} />
+                  <button type="submit" style={{ alignSelf: 'flex-start', padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Ավելացնել</button>
                 </form>
-
-                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
-                  <h4 style={{ fontSize: '14px', marginBottom: '12px', color: '#334155' }}>Պահպանված գրառումներ ({dbNotes.length})</h4>
-                  {dbNotes.length === 0 ? (
-                    <p style={{ fontSize: '13px', color: '#94a3b8' }}>Բազան դատարկ է։</p>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '200px', overflowY: 'auto' }}>
-                      {dbNotes.map((note) => (
-                        <div key={note.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f1f5f9', padding: '10px 14px', borderRadius: '6px' }}>
-                          <div>
-                            <h5 style={{ fontSize: '14px', margin: 0, color: '#1e293b' }}>{note.title}</h5>
-                            <p style={{ fontSize: '12px', margin: '4px 0 0', color: '#64748b' }}>{note.content} <span style={{ fontSize: '10px', color: '#94a3b8' }}>({note.date})</span></p>
-                          </div>
-                          <button onClick={() => handleDeleteNote(note.id)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>Ջնջել</button>
-                        </div>
-                      ))}
+                <div>
+                  {dbNotes.map((note) => (
+                    <div key={note.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f1f5f9', padding: '10px 14px', borderRadius: '6px', marginBottom: '8px' }}>
+                      <div><h5>{note.title}</h5><p style={{ fontSize: '12px', color: '#64748b' }}>{note.content}</p></div>
+                      <button onClick={() => handleDeleteNote(note.id)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>Ջնջել</button>
                     </div>
-                  )}
+                  ))}
                 </div>
               </div>
 
-              {/* Անվտանգության և PIN կոդի բաժին */}
               <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
                 <h2 style={{ fontSize: '18px', marginBottom: '8px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <ShieldCheck size={20} color="#16a34a" /> Տեղային անվտանգություն (PIN Կոդ)
+                  <ShieldCheck size={20} color="#16a34a" /> Տեղային անվտանգություն (PIN)
                 </h2>
-                <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-                  Պաշտպանեք ձեր տեղային ֆայլերն ու տվյալները PIN կոդով։
-                </p>
-
                 {!pinCode ? (
                   <form onSubmit={handleSetPin} style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    <input 
-                      type="password" 
-                      maxLength="6"
-                      placeholder="Մուտքագրեք նոր PIN..." 
-                      value={enteredPin}
-                      onChange={(e) => setEnteredPin(e.target.value)}
-                      style={{ padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', width: '200px' }}
-                    />
-                    <button type="submit" style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '500', cursor: 'pointer', fontSize: '13px' }}>
-                      Սահմանել PIN
-                    </button>
+                    <input type="password" maxLength="6" placeholder="PIN..." value={enteredPin} onChange={(e) => setEnteredPin(e.target.value)} style={{ padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                    <button type="submit" style={{ padding: '10px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Սահմանել PIN</button>
                   </form>
                 ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f0fdf4', padding: '12px 16px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
-                    <span style={{ fontSize: '13px', color: '#166534', fontWeight: '500' }}>🔒 PIN կոդը հաջողությամբ ակտիվացված է</span>
-                    <button onClick={handleRemovePin} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: '500' }}>
-                      Անջատել PIN-ը
-                    </button>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f0fdf4', padding: '12px 16px', borderRadius: '6px' }}>
+                    <span>🔒 PIN կոդը ակտիվ է</span>
+                    <button onClick={handleRemovePin} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }}>Անջատել</button>
                   </div>
                 )}
               </div>
+            </div>
+          </section>
+        )}
 
+        {activeTab === 'extra-features' && (
+          <section id="extra-features" className="fade-in" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', background: '#f8fafc', minHeight: 'calc(100vh - 70px)', boxSizing: 'border-box' }}>
+            <div style={{ width: '100%', maxWidth: '800px', background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
+              <h2 style={{ fontSize: '18px', marginBottom: '8px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Sparkles size={20} color="#7c3aed" /> Լրացուցիչ կարգավորումներ
+              </h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={extraSettings.autoSave} onChange={(e) => setExtraSettings({...extraSettings, autoSave: e.target.checked})} />
+                  Ավտոմատ պահպանում
+                </label>
+              </div>
             </div>
           </section>
         )}
 
         <style>{`
-          .docx-viewer-container .docx-page,
-          .docx-viewer-container section {
-            background: #ffffff !important;
-            width: 794px !important;
-            min-height: 1123px !important;
-            max-height: 1123px !important;
-            overflow: hidden !important;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15) !important;
-            margin: 0 auto !important;
+          .docx-pages-container {
+            background: #cbd5e1 !important;
+            width: 100% !important;
+            min-height: calc(100vh - 70px) !important;
+            padding: 40px 0 60px !important;
             box-sizing: border-box !important;
-            border-radius: 2px !important;
-            padding: 50px 65px !important;
+            overflow-x: auto !important;
+          }
+
+          /* Չենք փոխում docx-preview-ի կողմից հաշվարկված էջի width/height-ը։
+             Այդ չափերը գալիս են հենց Word ֆայլի section/page settings-ից։ */
+          .docx-pages-container .docx-wrapper {
+            background: transparent !important;
+            padding: 0 !important;
+            margin: 0 auto !important;
+            width: max-content !important;
+            min-width: 100% !important;
+          }
+
+          .docx-pages-container .docx-wrapper > section.docx {
+            margin: 0 auto 28px !important;
+            background: #fff !important;
+            box-shadow: 0 3px 16px rgba(0, 0, 0, 0.18) !important;
+            box-sizing: border-box !important;
+            position: relative !important;
+          }
+
+          .docx-pages-container .docx-wrapper > section.docx:last-child {
+            margin-bottom: 0 !important;
+          }
+
+          /* Պարբերությունը չկիսել երկու էջերի միջև, երբ հնարավոր է։ */
+          .docx-pages-container .docx-wrapper > section.docx p,
+          .docx-pages-container .docx-wrapper > section.docx li,
+          .docx-pages-container .docx-wrapper > section.docx table,
+          .docx-pages-container .docx-wrapper > section.docx tr {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+
+          /* Երկար պարբերությունը, որը ֆիզիկապես չի տեղավորվում մեկ էջում,
+             պետք է կարողանա շարունակվել հաջորդ էջում։ */
+          .docx-pages-container .docx-wrapper > section.docx p {
+            orphans: 2;
+            widows: 2;
+          }
+
+          @media screen and (max-width: 900px) {
+            .docx-pages-container {
+              padding-left: 12px !important;
+              padding-right: 12px !important;
+            }
+
+            .docx-pages-container .docx-wrapper {
+              width: max-content !important;
+              min-width: 0 !important;
+              transform-origin: top center;
+            }
           }
 
           @media print {
-            body { background: #fff !important; }
-            .sidebar, .topbar, div[style*="display: flex; align-items: center; gap: 12px; margin-bottom: 20px"], button { display: none !important; }
-            .print-workspace, #editor-tool, #db-security { padding: 0 !important; background: #fff !important; }
-            #editor-tool textarea, #db-security input, #db-security textarea { border: none !important; resize: none !important; }
-            .docx-viewer-container .docx-page,
-            .docx-viewer-container section {
-              box-shadow: none !important;
+            @page {
+              size: A4 portrait;
+              margin: 0;
+            }
+
+            html, body {
               margin: 0 !important;
-              width: 100% !important;
-              min-height: 100vh !important;
-              max-height: none !important;
+              padding: 0 !important;
+              background: #fff !important;
+            }
+
+            .sidebar,
+            .topbar,
+            button,
+            label {
+              display: none !important;
+            }
+
+            .content {
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+
+            .print-workspace,
+            .docx-pages-container {
+              padding: 0 !important;
+              margin: 0 !important;
+              background: #fff !important;
               overflow: visible !important;
-              page-break-after: always !important;
+            }
+
+            .docx-pages-container .docx-wrapper {
+              width: auto !important;
+              min-width: 0 !important;
+              margin: 0 !important;
+            }
+
+            .docx-pages-container .docx-wrapper > section.docx {
+              margin: 0 !important;
+              box-shadow: none !important;
               break-after: page !important;
+              page-break-after: always !important;
+            }
+
+            .docx-pages-container .docx-wrapper > section.docx:last-child {
+              break-after: auto !important;
+              page-break-after: auto !important;
             }
           }
         `}</style>
