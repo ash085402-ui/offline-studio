@@ -600,6 +600,12 @@ export default function App() {
     setPreviewOpen(true)
   }
 
+  const closeSelectedFile = () => {
+    setSelectedId(null)
+    setEditing(false)
+    setPreviewOpen(false)
+  }
+
   const printDocument = () => window.print()
   const openCreateModal = () => {
     setNewDocTitle('')
@@ -669,6 +675,7 @@ export default function App() {
                 <button className={`button button-quiet ${editing ? 'is-editing' : ''}`} onClick={toggleEditing} title="Խմբագրել"><Pencil size={15} /><span>{editing ? 'Խմբագրում' : 'Խմբագրել'}</span></button>
                 {editing && <button className="button button-primary compact-button" onClick={saveEditedCopy}><Check size={15} /><span>Պահել պատճենը</span></button>}
                 <button className="button button-primary compact-button" onClick={openPrintPreview}><Printer size={15} /><span>Տպել / PDF</span></button>
+                <button className="button button-quiet" onClick={closeSelectedFile} title="Փակել փաստաթուղթը" aria-label="Փակել փաստաթուղթը"><X size={15} /></button>
               </>
             )}
             <button className="button button-quiet" onClick={() => fileInputRef.current?.click()}><Upload size={15} /><span>Բացել ֆայլ</span></button>
@@ -717,7 +724,7 @@ export default function App() {
               <button className="button button-outline rail-upload" onClick={() => fileInputRef.current?.click()}><Upload size={15} /> Ներմուծել ֆայլեր</button>
             </aside>
             <section className="viewer-area">
-              <div className="viewer-toolbar"><div className="viewer-file-title">{selectedFile ? <><FileType kind={selectedFile.kind} /><span>{selectedFile.name}</span><i className="saved-mark"><Check size={12} /> Տեղային</i></> : <span>Փաստաթուղթ ընտրված չէ</span>}</div><div className="viewer-meta">{selectedFile && <><span>{pageCount} էջ</span><span className="meta-divider" />A4</>}</div></div>
+              <div className="viewer-toolbar"><div className="viewer-file-title">{!selectedFile && <span>Փաստաթուղթ ընտրված չէ</span>}</div><div className="viewer-meta">{selectedFile && <><span>{pageCount} էջ</span><span className="meta-divider" />A4</>}</div></div>
               <div className="paper-stage">
                 {!selectedFile && <div className="viewer-empty"><span className="empty-icon"><FileText size={23} /></span><h2>Ընտրեք փաստաթուղթը</h2><p>Ձեր տեղային ֆայլերը հասանելի են միայն այս սարքում։</p><button className="button button-primary" onClick={() => fileInputRef.current?.click()}><Upload size={15} /> Բացել ֆայլ</button></div>}
                 {busy && <div className="loading-indicator"><span className="spinner" /> Փաստաթուղթը մշակվում է…</div>}
