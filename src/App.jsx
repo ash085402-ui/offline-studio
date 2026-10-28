@@ -248,6 +248,12 @@ export default function App() {
   }, [refreshFiles])
 
   useEffect(() => {
+    if (!message) return undefined
+    const timeout = window.setTimeout(() => setMessage(''), 3000)
+    return () => window.clearTimeout(timeout)
+  }, [message])
+
+  useEffect(() => {
     if (!selectedId) {
       setSelectedFile(null)
       setTextContent('')

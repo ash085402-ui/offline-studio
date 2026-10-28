@@ -170,3 +170,10 @@
   .document-pages .pdf-canvas,
   .document-pages .generated-image { max-width: 100% !important; max-height: 257mm !important; object-fit: contain; }
 }
+
+@media screen {
+  .paper-stage { padding-top: 76px !important; }
+  .document-pages .docx-wrapper > section.docx,
+  .document-pages .paper-page,
+  .document-pages .pdf-sheet { padding-top: clamp(24px, 6.5vw, 24mm) !important; }
+}
