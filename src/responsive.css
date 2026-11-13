@@ -5,8 +5,17 @@
   max-width: 100% !important;
 }
 
-.document-pages .docx-wrapper > section.docx,
+.document-pages { gap: 16px !important; }
+.document-pages .docx-page-frame {
+  position: relative;
+  flex: 0 0 auto;
+  overflow: hidden;
+  margin: 0 auto;
+}
+.document-pages > .paper-page { margin: 0 auto !important; }
+
 .document-pages .paper-page {
+  flex: 0 0 auto;
   width: min(210mm, 100%) !important;
   min-width: 0 !important;
   max-width: 100% !important;
@@ -18,10 +27,6 @@
   overflow: hidden !important;
 }
 
-.document-pages .docx-wrapper > section.docx {
-  height: auto !important;
-}
-
 .document-pages .text-page article {
   max-height: calc(100% - 35px);
   overflow: hidden;
@@ -29,16 +34,17 @@
   line-height: 1.5;
 }
 
-.document-pages .pdf-sheet {
-  padding: clamp(18px, 5.2vw, 20mm) !important;
+.document-pages > .pdf-sheet {
+  padding: 0 !important;
 }
 
 .document-pages .pdf-canvas,
 .document-pages .generated-image {
   display: block;
   width: 100%;
+  height: auto;
   max-width: 100%;
-  max-height: 100%;
+  max-height: none;
   object-fit: contain;
 }
 
@@ -138,7 +144,6 @@
 
 @media (max-width: 800px) {
   .document-pages { padding-inline: 8px; }
-  .document-pages .docx-wrapper > section.docx,
   .document-pages .paper-page { width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
   .document-pages .studio-page-number,
   .document-pages .text-page footer { right: 18px !important; bottom: 14px !important; left: 18px !important; }
@@ -163,7 +168,6 @@
   .create-modal-footer .button { min-height: 38px; }
   .document-pages { gap: 13px !important; padding-inline: 0; }
   .document-pages .docx-wrapper { gap: 13px !important; }
-  .document-pages .docx-wrapper > section.docx,
   .document-pages .paper-page { margin-bottom: 13px !important; }
   .document-pages .text-page article { max-height: calc(100% - 27px); font-size: 9pt; line-height: 1.5; }
   .document-pages .studio-page-number,
@@ -205,7 +209,6 @@
   .document-workspace { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: minmax(0, 1fr) !important; }
   .document-workspace .viewer-area { grid-column: 1; grid-row: 1; min-width: 0; }
   .paper-stage { overflow-x: hidden; overscroll-behavior-x: none; touch-action: pan-y; }
-  .document-pages .docx-wrapper > section.docx,
   .document-pages .paper-page { width: 100% !important; max-width: 100% !important; min-height: 0 !important; }
 }
 
@@ -286,7 +289,6 @@
 
 @media screen {
   .paper-stage { padding-top: 76px !important; }
-  .document-pages .docx-wrapper > section.docx,
   .document-pages .paper-page,
   .document-pages .pdf-sheet { padding-top: clamp(24px, 6.5vw, 24mm) !important; }
 }
@@ -313,7 +315,6 @@
   .document-pages .docx-wrapper { width: 100%; }
   .document-workspace { grid-template-columns: minmax(0, 1fr); }
   .paper-stage { padding-right: 0 !important; padding-left: 0 !important; }
-  .document-pages .docx-wrapper > section.docx,
   .document-pages .paper-page { width: min(100%, 56rem) !important; min-width: 0 !important; max-width: min(100%, 56rem) !important; min-height: 0 !important; margin-right: auto !important; margin-left: auto !important; box-sizing: border-box !important; }
 }
 

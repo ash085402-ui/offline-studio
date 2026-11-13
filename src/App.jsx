@@ -121,6 +121,166 @@ function revokeFileUrl(url) {
   try { URL.revokeObjectURL(url) } catch { }
 }
 
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character])
+}
+
+function paginateDocxPages(container) {
+  const wrapper = container.querySelector('.docx-wrapper')
+  if (!wrapper) return { count: 1, observer: null }
+
+  const sourcePages = [...wrapper.querySelectorAll(':scope > section.docx')]
+  if (!sourcePages.length) return { count: 1, observer: null }
+
+  wrapper.style.setProperty('display', 'flex', 'important')
+  wrapper.style.setProperty('flex-direction', 'column', 'important')
+  wrapper.style.setProperty('align-items', 'center', 'important')
+  wrapper.style.setProperty('gap', '16px', 'important')
+  wrapper.style.setProperty('width', '100%', 'important')
+  wrapper.style.setProperty('padding', '0', 'important')
+  wrapper.style.setProperty('box-sizing', 'border-box', 'important')
+
+  const isHeadingBlock = (block) => {
+    if (/^H[1-6]$/.test(block.tagName) || /heading/i.test(String(block.className))) return true
+    const textLength = block.textContent.trim().length
+    if (!textLength) return false
+    const boldLength = [...block.querySelectorAll('strong, b, [style*="font-weight"]')]
+      .filter((run) => run.style.fontWeight === 'bold' || Number.parseInt(run.style.fontWeight || getComputedStyle(run).fontWeight, 10) >= 600)
+      .reduce((length, run) => length + run.textContent.trim().length, 0)
+    return boldLength / textLength >= 0.65
+  }
+
+  const groupsFor = (blocks) => {
+    const groups = []
+    for (let index = 0; index < blocks.length; index += 1) {
+      const group = [blocks[index]]
+      if (isHeadingBlock(blocks[index]) && index + 1 < blocks.length) {
+        let next = index + 1
+        while (next < blocks.length && !blocks[next].textContent.trim()) {
+          group.push(blocks[next])
+          next += 1
+        }
+        if (next < blocks.length) group.push(blocks[next])
+        index = next
+      }
+      groups.push(group)
+    }
+    return groups
+  }
+
+  const paginatedPages = []
+  for (const sourcePage of sourcePages) {
+    const computed = getComputedStyle(sourcePage)
+    const pageWidth = sourcePage.style.width || computed.width || '210mm'
+    const pagePadding = sourcePage.style.padding || computed.padding
+    const pageHeight = sourcePage.style.height && sourcePage.style.height !== 'auto'
+      ? sourcePage.style.height
+      : sourcePage.style.minHeight || computed.minHeight || '297mm'
+    sourcePage.style.setProperty('width', pageWidth, 'important')
+    sourcePage.style.setProperty('min-width', pageWidth, 'important')
+    sourcePage.style.setProperty('max-width', 'none', 'important')
+    sourcePage.style.setProperty('height', pageHeight, 'important')
+    sourcePage.style.setProperty('padding', pagePadding, 'important')
+    sourcePage.style.setProperty('margin', '0', 'important')
+
+    const originalChildren = [...sourcePage.childNodes]
+    const articles = originalChildren.filter((child) => child.nodeType === Node.ELEMENT_NODE && child.tagName === 'ARTICLE')
+    if (!articles.length || sourcePage.scrollHeight <= sourcePage.clientHeight + 1) {
+      paginatedPages.push(sourcePage)
+      continue
+    }
+
+    const blocksByArticle = articles.map((article) => [...article.children])
+    const groupsByArticle = blocksByArticle.map(groupsFor)
+    const template = sourcePage.cloneNode(false)
+    const deferredChildren = []
+    const pageList = []
+
+    const createPage = (reuseSourcePage = false) => {
+      const page = reuseSourcePage ? sourcePage : template.cloneNode(false)
+      if (!reuseSourcePage) wrapper.append(page)
+      page.replaceChildren()
+      const pageArticles = []
+      originalChildren.forEach((child) => {
+        const articleIndex = articles.indexOf(child)
+        if (articleIndex >= 0) {
+          const article = reuseSourcePage ? child : child.cloneNode(false)
+          article.replaceChildren()
+          page.append(article)
+          pageArticles[articleIndex] = article
+        } else if (child.nodeType === Node.ELEMENT_NODE && /^(HEADER|FOOTER)$/.test(child.tagName)) {
+          page.append(reuseSourcePage ? child : child.cloneNode(true))
+        } else if (child.nodeType === Node.ELEMENT_NODE && /footnote|endnote/i.test(String(child.className))) {
+          if (!deferredChildren.includes(child)) deferredChildren.push(child)
+        } else if (reuseSourcePage) {
+          page.append(child)
+        }
+      })
+      const current = { page, articles: pageArticles, hasContent: false }
+      pageList.push(current)
+      return current
+    }
+
+    const exceedsPage = (currentPage, articleIndex) => {
+      const article = currentPage.articles[articleIndex]
+      const pageStyle = getComputedStyle(currentPage.page)
+      const availableHeight = currentPage.page.clientHeight - article.offsetTop - (Number.parseFloat(pageStyle.paddingBottom) || 0)
+      return article.scrollHeight > availableHeight + 1
+    }
+
+    let currentPage = createPage(true)
+    for (let articleIndex = 0; articleIndex < articles.length; articleIndex += 1) {
+      const groups = groupsByArticle[articleIndex]
+      for (const group of groups) {
+        const targetArticle = currentPage.articles[articleIndex]
+        group.forEach((block) => targetArticle.append(block))
+
+        if (!exceedsPage(currentPage, articleIndex) || !currentPage.hasContent) {
+          currentPage.hasContent = true
+          continue
+        }
+
+        group.forEach((block) => block.remove())
+        currentPage = createPage()
+        group.forEach((block) => currentPage.articles[articleIndex].append(block))
+        currentPage.hasContent = true
+      }
+    }
+
+    deferredChildren.forEach((child) => pageList[pageList.length - 1].page.append(child))
+    paginatedPages.push(...pageList.map(({ page }) => page))
+  }
+
+  paginatedPages.forEach((page) => wrapper.append(page))
+
+  const pageMetrics = paginatedPages.map((page) => {
+    page.style.setProperty('margin', '0', 'important')
+    page.style.setProperty('flex', '0 0 auto', 'important')
+    page.style.setProperty('transform-origin', 'top center', 'important')
+    page.style.setProperty('transform', 'scale(1)', 'important')
+    const width = page.offsetWidth
+    const height = page.offsetHeight
+    return { page, width, height }
+  })
+
+  const scalePages = () => {
+    const availableWidth = container.clientWidth - 24
+    if (availableWidth <= 0) return
+
+    pageMetrics.forEach(({ page, width, height }) => {
+      const scale = Math.min(1, availableWidth / width)
+      page.style.setProperty('transform', `scale(${scale})`, 'important')
+      page.style.setProperty('margin-bottom', `${height * (scale - 1)}px`, 'important')
+    })
+  }
+
+  const observer = new ResizeObserver(scalePages)
+  observer.observe(container)
+  scalePages()
+
+  return { count: pageMetrics.length, observer }
+}
+
 export default function App() {
   const [activeView, setActiveView] = useState('home')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -215,15 +375,38 @@ export default function App() {
       return
     }
     let cancelled = false
+    let pageResizeObserver = null
     const load = async () => {
       try {
         let record = memoryFilesRef.current.get(selectedId) || await getFile(selectedId)
         if (!record || cancelled) return
         const fileUrl = await getFileUrl(record)
         if (!fileUrl) return
+        const effectiveKind = record.type === 'image/png' ? 'PNG' : record.kind
         setBusy(true)
-        setSelectedFile({ ...record, fileUrl })
-        if (record.kind === 'PDF') {
+        setEditing(false)
+        setPageCount(1)
+        setSelectedFile({ ...record, fileUrl, kind: effectiveKind })
+        const kind = effectiveKind
+
+        if (kind === 'Word' && record.name.toLowerCase().endsWith('.docx')) {
+          const response = await fetch(fileUrl)
+          if (!response.ok) throw new Error('Unable to access DOCX')
+          const buffer = await response.arrayBuffer()
+          const docxViewer = await import('docx-preview')
+          if (viewerRef.current) {
+            viewerRef.current.replaceChildren()
+            await docxViewer.renderAsync(buffer.slice(0), viewerRef.current, undefined, {
+              inWrapper: true, ignoreWidth: false, ignoreHeight: false, breakPages: true,
+              ignoreLastRenderedPageBreak: false
+            })
+            if (!cancelled) {
+              const pagination = paginateDocxPages(viewerRef.current)
+              pageResizeObserver = pagination.observer
+              setPageCount(pagination.count)
+            }
+          }
+        } else if (kind === 'PDF') {
           const pdfjs = await import('pdfjs-dist')
           pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
           const pdf = await pdfjs.getDocument({ url: fileUrl }).promise
@@ -234,28 +417,52 @@ export default function App() {
             const page = await pdf.getPage(i)
             const viewport = page.getViewport({ scale: 1.15 })
             const canvas = document.createElement('canvas')
+            canvas.className = 'pdf-canvas'
             canvas.width = viewport.width
             canvas.height = viewport.height
             await page.render({ canvas, canvasContext: canvas.getContext('2d'), viewport }).promise
             const sheet = document.createElement('section')
             sheet.className = 'pdf-sheet paper-page'
+            sheet.style.aspectRatio = `${viewport.width} / ${viewport.height}`
             sheet.append(canvas)
             viewerRef.current.append(sheet)
           }
+        } else if (kind === 'Excel') {
+          const response = await fetch(fileUrl)
+          const buffer = await response.arrayBuffer()
+          const { default: ExcelJS } = await import('exceljs')
+          const workbook = new ExcelJS.Workbook()
+          await workbook.xlsx.load(buffer.slice(0))
+          const sheet = workbook.worksheets[0]
+          const rows = []
+          sheet.eachRow({ includeEmpty: true }, (row) => {
+            rows.push(`<tr>${row.values.slice(1).map((val) => `<td>${escapeHtml(String(val ?? ''))}</td>`).join('')}</tr>`)
+          })
+          viewerRef.current.innerHTML = `<section class="spreadsheet-page paper-page"><table id="sheet-table"><tbody>${rows.join('')}</tbody></table></section>`
+          setPageCount(1)
+        } else {
+          const response = await fetch(fileUrl)
+          const text = await response.text()
+          setTextContent(text)
+          if (viewerRef.current) {
+            viewerRef.current.innerHTML = `<section class="text-page paper-page"><article>${escapeHtml(text).replace(/\n/g, '<br>')}</article></section>`
+          }
+          setPageCount(1)
         }
       } catch (e) {
         console.error(e)
-        setMessage('Ֆայլը չհաջողվեց բեռնել։')
+        setMessage('Ֆայլը չհաջողվեց բացել։')
       } finally {
         if (!cancelled) setBusy(false)
       }
     }
     load()
-    return () => { cancelled = true }
-  }, [selectedId])
+    return () => { cancelled = true; pageResizeObserver?.disconnect() }
+  }, [selectedId, isMobileDevice])
 
   const handleUpload = async (event) => {
-    const incoming = [...(event.currentTarget.files || [])]
+    const input = event.currentTarget
+    const incoming = [...(input.files || [])]
     if (!incoming.length) return
     setBusy(true)
     try {
@@ -269,7 +476,7 @@ export default function App() {
       setActiveView('documents')
     } finally {
       setBusy(false)
-      event.currentTarget.value = ''
+      input.value = ''
     }
   }
 
