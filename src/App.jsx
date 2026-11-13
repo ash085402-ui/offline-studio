@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Activity, ArrowRight, BookOpen, Check,
+  Activity, ArrowRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, EllipsisVertical,
   Cpu, Database, FileSpreadsheet, FileText, HardDrive, LockKeyhole, Menu, Pencil,
-  Plus, Printer, Search, ShieldCheck, Sparkles, Trash2, Upload, X
+  Plus, Printer, Search, ShieldCheck, Sparkles, Upload, X
 } from 'lucide-react'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
@@ -12,7 +12,35 @@ const DB_NAME = 'offline-studio-v10'
 const DB_VERSION = 1
 const FILE_STORE = 'files'
 const CONFIG_STORE = 'config'
-const FILTERS = ['Բոլորը', 'Word', 'PDF', 'Excel', 'Փաստաթուղթ']
+const FILE_CATEGORIES = [
+  { id: 'Word', label: 'Word', kinds: ['Word'] },
+  { id: 'PDF', label: 'PDF', kinds: ['PDF'] },
+  { id: 'Excel', label: 'Excel', kinds: ['Excel'] },
+  { id: 'other', label: 'Այլ փաստաթղթեր', kinds: ['Փաստաթուղթ', 'PNG'] },
+]
+const PAPER_SIZES = {
+  A4: { label: 'A4', width: 210, height: 297 },
+  Letter: { label: 'Letter', width: 216, height: 279 },
+  Legal: { label: 'Legal', width: 216, height: 356 },
+}
+
+function parsePageRange(value, pageCount) {
+  const normalized = value.trim().toLowerCase()
+  if (!normalized || normalized === 'all' || normalized === 'բոլորը') {
+    return Array.from({ length: pageCount }, (_, index) => index + 1)
+  }
+
+  const pages = new Set()
+  for (const part of normalized.split(',')) {
+    const match = part.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/)
+    if (!match) return null
+    const start = Number(match[1])
+    const end = Number(match[2] || match[1])
+    if (start < 1 || end < start || end > pageCount) return null
+    for (let page = start; page <= end; page += 1) pages.add(page)
+  }
+  return [...pages].sort((a, b) => a - b)
+}
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -128,13 +156,11 @@ async function createSafeFileUrl(blob) {
   try {
     if (typeof URL.createObjectURL === 'function') return URL.createObjectURL(blob)
   } catch {
-    // Continue with the Data URL fallback.
   }
 
   try {
     return await readBlobAsDataUrl(blob)
   } catch {
-    // Use the Blob API if FileReader is unavailable or fails.
   }
 
   try {
@@ -149,21 +175,109 @@ function revokeFileUrl(url) {
   try {
     URL.revokeObjectURL(url)
   } catch {
-    // URL cleanup is best effort.
   }
+}
+
+function clearDocumentHighlights(root) {
+  root.querySelectorAll('mark.document-find-hit').forEach((mark) => {
+    mark.replaceWith(document.createTextNode(mark.textContent || ''))
+  })
+  root.normalize()
+}
+
+function highlightDocumentMatches(root, query, activeIndex) {
+  clearDocumentHighlights(root)
+  if (!query) return 0
+
+  const matcher = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu')
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const textNodes = []
+  while (walker.nextNode()) textNodes.push(walker.currentNode)
+
+  let matchIndex = 0
+  for (const textNode of textNodes) {
+    const text = textNode.nodeValue || ''
+    matcher.lastIndex = 0
+    let match
+    let cursor = 0
+    const fragment = document.createDocumentFragment()
+    while ((match = matcher.exec(text))) {
+      fragment.append(document.createTextNode(text.slice(cursor, match.index)))
+      const mark = document.createElement('mark')
+      mark.className = `document-find-hit${matchIndex === activeIndex ? ' is-active' : ''}`
+      mark.textContent = match[0]
+      fragment.append(mark)
+      cursor = match.index + match[0].length
+      matchIndex += 1
+    }
+    if (cursor) {
+      fragment.append(document.createTextNode(text.slice(cursor)))
+      textNode.replaceWith(fragment)
+    }
+  }
+
+  root.querySelector('mark.document-find-hit.is-active')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  return matchIndex
+}
+
+function decorateSelection(style, wordsOnly = false) {
+  const selection = window.getSelection()
+  if (!selection?.rangeCount || selection.isCollapsed) return false
+
+  const range = selection.getRangeAt(0)
+  const fragment = range.extractContents()
+  if (wordsOnly) {
+    const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT)
+    const nodes = []
+    while (walker.nextNode()) nodes.push(walker.currentNode)
+    for (const node of nodes) {
+      const parts = node.nodeValue.match(/[\p{L}\p{N}_]+|[^\p{L}\p{N}_]+/gu) || []
+      const replacement = document.createDocumentFragment()
+      for (const part of parts) {
+        if (!/[\p{L}\p{N}_]/u.test(part)) {
+          replacement.append(document.createTextNode(part))
+          continue
+        }
+        const span = document.createElement('span')
+        span.style.textDecorationLine = 'underline'
+        span.style.textDecorationStyle = style
+        span.textContent = part
+        replacement.append(span)
+      }
+      node.replaceWith(replacement)
+    }
+    range.insertNode(fragment)
+  } else {
+    const span = document.createElement('span')
+    span.style.textDecorationLine = 'underline'
+    span.style.textDecorationStyle = style
+    span.append(fragment)
+    range.insertNode(span)
+  }
+
+  selection.removeAllRanges()
+  return true
 }
 
 export default function App() {
   const [activeView, setActiveView] = useState('home')
   const [menuOpen, setMenuOpen] = useState(false)
+  const [fileDrawerOpen, setFileDrawerOpen] = useState(false)
   const [files, setFiles] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [selectedFile, setSelectedFile] = useState(null)
-  const [filter, setFilter] = useState('Բոլորը')
+  const [renamingId, setRenamingId] = useState(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [openFileMenuId, setOpenFileMenuId] = useState(null)
+  const [openCategories, setOpenCategories] = useState({})
   const [search, setSearch] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [pageCount, setPageCount] = useState(1)
+  const [previewPage, setPreviewPage] = useState(1)
+  const [pageRange, setPageRange] = useState('all')
+  const [copies, setCopies] = useState(1)
+  const [paperSize, setPaperSize] = useState('A4')
   const [editing, setEditing] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [pinHash, setPinHash] = useState('')
@@ -176,11 +290,38 @@ export default function App() {
   const [newDocText, setNewDocText] = useState('')
   const [newDocFormat, setNewDocFormat] = useState('docx')
   const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findMode, setFindMode] = useState('find')
+  const [findQuery, setFindQuery] = useState('')
+  const [replaceQuery, setReplaceQuery] = useState('')
+  const [goToPage, setGoToPage] = useState('1')
+  const [findIndex, setFindIndex] = useState(0)
+  const [findCount, setFindCount] = useState(0)
   const memoryFilesRef = useRef(new Map())
   const objectUrlsRef = useRef(new Map())
   const viewerRef = useRef(null)
   const previewRef = useRef(null)
+  const fileMenuRef = useRef(null)
+
+  useEffect(() => {
+    if (!openFileMenuId) return undefined
+
+    const closeOnOutsideClick = (event) => {
+      if (!fileMenuRef.current?.contains(event.target)) setOpenFileMenuId(null)
+    }
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setOpenFileMenuId(null)
+    }
+
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [openFileMenuId])
   const fileInputRef = useRef(null)
+  const findInputRef = useRef(null)
 
   const refreshFiles = useCallback(async () => {
     let storedRecords = []
@@ -252,6 +393,21 @@ export default function App() {
     const timeout = window.setTimeout(() => setMessage(''), 3000)
     return () => window.clearTimeout(timeout)
   }, [message])
+
+  useEffect(() => {
+    let frame
+    if (!selectedFile || !viewerRef.current) {
+      frame = window.requestAnimationFrame(() => setFindCount(0))
+    } else {
+      const count = highlightDocumentMatches(viewerRef.current, findQuery.trim(), findIndex)
+      frame = window.requestAnimationFrame(() => setFindCount(count))
+    }
+    return () => window.cancelAnimationFrame(frame)
+  }, [findQuery, findIndex, selectedFile, textContent, busy])
+
+  useEffect(() => {
+    if (findOpen) findInputRef.current?.focus()
+  }, [findOpen, findMode])
 
   useEffect(() => {
     if (!selectedId) {
@@ -406,13 +562,55 @@ export default function App() {
       })
       return clone
     })
+    let pageNumber = 0
+    clones.forEach((clone) => {
+      clone.querySelectorAll('.docx-page-frame, .paper-page').forEach((page) => {
+        page.dataset.previewPage = String(++pageNumber)
+      })
+    })
     previewRef.current.replaceChildren(...clones)
   }, [previewOpen, pageCount, selectedId, busy])
 
-  const visibleFiles = files.filter((file) => (
-    (filter === 'Բոլորը' || file.kind === filter)
-    && file.name.toLowerCase().includes(search.toLowerCase())
-  ))
+  useEffect(() => {
+    if (!previewOpen || !previewRef.current) return
+    const preview = previewRef.current
+    const size = PAPER_SIZES[paperSize]
+    const updatePreviewPages = () => {
+      const availableWidth = Math.max(280, preview.parentElement?.clientWidth - 40 || 520)
+      const width = Math.min(520, availableWidth)
+      const height = width * size.height / size.width
+      const scale = width / (size.width * 96 / 25.4)
+      preview.querySelectorAll('[data-preview-page]').forEach((page) => {
+        const isSelected = Number(page.dataset.previewPage) === previewPage
+        page.hidden = !isSelected
+        if (page.classList.contains('docx-page-frame')) {
+          const docxPage = page.querySelector(':scope > section.docx')
+          page.style.width = `${width}px`
+          page.style.height = `${height}px`
+          page.style.position = 'relative'
+          if (docxPage) {
+            docxPage.style.setProperty('position', 'absolute', 'important')
+            docxPage.style.setProperty('top', '0', 'important')
+            docxPage.style.setProperty('left', '0', 'important')
+            docxPage.style.setProperty('width', `${size.width}mm`, 'important')
+            docxPage.style.setProperty('height', `${size.height}mm`, 'important')
+            docxPage.style.setProperty('min-height', `${size.height}mm`, 'important')
+            docxPage.style.setProperty('transform', `scale(${scale})`, 'important')
+          }
+        } else {
+          page.style.setProperty('width', `${width}px`, 'important')
+          page.style.setProperty('height', `${height}px`, 'important')
+          page.style.aspectRatio = `${size.width} / ${size.height}`
+        }
+      })
+    }
+    updatePreviewPages()
+    const observer = new ResizeObserver(updatePreviewPages)
+    if (preview.parentElement) observer.observe(preview.parentElement)
+    return () => observer.disconnect()
+  }, [previewOpen, previewPage, paperSize, pageCount, selectedId, busy])
+
+  const searchedFiles = files.filter((file) => file.name.toLowerCase().includes(search.toLowerCase()))
 
   const handleUpload = async (event) => {
     const input = event.currentTarget
@@ -443,6 +641,7 @@ export default function App() {
       }
       setFiles((current) => [...newRecords, ...current.filter((record) => !newRecords.some((next) => next.id === record.id))])
       setActiveView('documents')
+      setFileDrawerOpen(false)
       setMessage(`${incoming.length} ֆայլ բացվեց։`)
     } catch (error) {
       console.error(error)
@@ -453,8 +652,31 @@ export default function App() {
     }
   }
 
-  const removeFile = async (event, id) => {
-    event.stopPropagation()
+  const beginRename = (file) => {
+    const extensionIndex = file.name.lastIndexOf('.')
+    setRenamingId(file.id)
+    setRenameValue(extensionIndex > 0 ? file.name.slice(0, extensionIndex) : file.name)
+  }
+
+  const saveRename = (file) => {
+    const baseName = renameValue.trim()
+    if (!baseName) {
+      setMessage('Ֆայլի անունը չի կարող դատարկ լինել։')
+      return
+    }
+    const extensionIndex = file.name.lastIndexOf('.')
+    const extension = extensionIndex > 0 ? file.name.slice(extensionIndex) : ''
+    const renamedFile = { ...file, name: `${baseName}${extension}` }
+    saveFileRecord(renamedFile)
+    setFiles((current) => current.map((item) => item.id === file.id ? renamedFile : item))
+    setSelectedFile((current) => current?.id === file.id ? { ...current, name: renamedFile.name } : current)
+    setRenamingId(null)
+    setMessage('Ֆայլի անունը փոխվեց։')
+  }
+
+  const removeFile = async (id) => {
+    const file = files.find((item) => item.id === id)
+    if (!window.confirm(`Ուզում ես ջնջել թե ոչ\n${file?.name || ''}`)) return
     memoryFilesRef.current.delete(id)
     const fileUrl = objectUrlsRef.current.get(id)
     revokeFileUrl(fileUrl)
@@ -465,7 +687,7 @@ export default function App() {
     setMessage('Ֆայլը հեռացվեց այս աշխատաշրջանից։')
   }
 
-  const saveEditedCopy = async () => {
+  const saveEditedCopy = useCallback(async () => {
     if (!selectedFile) return
     if (selectedFile.kind === 'Փաստաթուղթ') {
       const content = viewerRef.current?.innerText ?? textContent
@@ -496,7 +718,7 @@ export default function App() {
       return
     }
     setEditing(false)
-  }
+  }, [selectedFile, textContent])
 
   const createDocument = async (event) => {
     event.preventDefault()
@@ -592,27 +814,162 @@ export default function App() {
     if (viewerRef.current) viewerRef.current.contentEditable = String(!editing)
   }
 
-  const openPrintPreview = () => {
+  const openPrintPreview = useCallback(() => {
     if (!selectedFile) {
       setMessage('Նախ ընտրեք կամ բացեք փաստաթուղթը։')
       return
     }
+    setPreviewPage(1)
     setPreviewOpen(true)
-  }
+  }, [selectedFile])
 
   const closeSelectedFile = () => {
     setSelectedId(null)
+    setFileDrawerOpen(false)
     setEditing(false)
     setPreviewOpen(false)
   }
 
-  const printDocument = () => window.print()
+  const printDocument = () => {
+    const selectedPages = parsePageRange(pageRange, pageCount)
+    const copyCount = Number(copies)
+    if (!selectedPages?.length) {
+      setMessage(`Նշեք էջերի ճիշտ միջակայք՝ 1-ից ${pageCount}։`)
+      return
+    }
+    if (!Number.isInteger(copyCount) || copyCount < 1 || copyCount > 99) {
+      setMessage('Օրինակների քանակը պետք է լինի 1-ից 99։')
+      return
+    }
+
+    const pageNodes = [...(previewRef.current?.querySelectorAll('[data-preview-page]') || [])]
+    if (!pageNodes.length) {
+      setMessage('Նախադիտման էջերը դեռ պատրաստ չեն։')
+      return
+    }
+    const printRoot = document.createElement('main')
+    printRoot.className = 'print-root'
+    const size = PAPER_SIZES[paperSize]
+    printRoot.style.setProperty('--print-width', `${size.width}mm`)
+    printRoot.style.setProperty('--print-height', `${size.height}mm`)
+    for (let copy = 0; copy < copyCount; copy += 1) {
+      for (const pageNumber of selectedPages) {
+        const source = pageNodes.find((page) => Number(page.dataset.previewPage) === pageNumber)
+        if (source) {
+          const pageCopy = source.cloneNode(true)
+          pageCopy.hidden = false
+          pageCopy.removeAttribute('hidden')
+          printRoot.append(pageCopy)
+        }
+      }
+    }
+    const printStyle = document.createElement('style')
+    printStyle.textContent = `@page { size: ${size.width}mm ${size.height}mm; margin: 0; }`
+    document.head.append(printStyle)
+    document.body.append(printRoot)
+    try {
+      window.print()
+    } finally {
+      printRoot.remove()
+      printStyle.remove()
+    }
+  }
+
+  const changePreviewPage = (direction) => {
+    setPreviewPage((current) => Math.min(pageCount, Math.max(1, current + direction)))
+  }
   const openCreateModal = () => {
     setNewDocTitle('')
     setNewDocText('')
     setNewDocFormat('docx')
     setCreateModalOpen(true)
   }
+
+  const openFindPanel = useCallback((mode = 'find') => {
+    setFindMode(mode)
+    setFindOpen(true)
+  }, [])
+
+  const moveFindResult = (direction) => {
+    if (!findCount) return
+    setFindIndex((current) => (current + direction + findCount) % findCount)
+  }
+
+  const replaceAllMatches = () => {
+    if (!viewerRef.current || !findQuery.trim()) return
+    clearDocumentHighlights(viewerRef.current)
+    const matcher = new RegExp(findQuery.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu')
+    const walker = document.createTreeWalker(viewerRef.current, NodeFilter.SHOW_TEXT)
+    const nodes = []
+    while (walker.nextNode()) nodes.push(walker.currentNode)
+    let replaced = 0
+    for (const node of nodes) {
+      const value = node.nodeValue || ''
+      const matches = value.match(matcher)
+      if (!matches) continue
+      replaced += matches.length
+      node.nodeValue = value.replace(matcher, replaceQuery)
+    }
+    setFindIndex(0)
+    setFindQuery(replaceQuery)
+    setMessage(`${replaced} համընկնում փոխարինվեց։`)
+  }
+
+  const navigateToPage = () => {
+    const pageNumber = Number.parseInt(goToPage, 10)
+    const pages = viewerRef.current?.querySelectorAll('.paper-page, .docx-page-frame > section.docx')
+    if (!pages?.length || !Number.isFinite(pageNumber) || pageNumber < 1 || pageNumber > pages.length) {
+      setMessage(`Մուտքագրեք 1-ից ${pages?.length || pageCount} էջի համար։`)
+      return
+    }
+    pages[pageNumber - 1].scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return
+      const key = event.key.toLowerCase()
+      const target = event.target
+      const isField = target instanceof HTMLElement && target.matches('input, textarea, select')
+
+      if (key === 'f' || key === 'h' || key === 'g') {
+        event.preventDefault()
+        openFindPanel(key === 'h' ? 'replace' : key === 'g' ? 'goto' : 'find')
+        return
+      }
+      if (key === 'n') {
+        event.preventDefault()
+        openCreateModal()
+      } else if (key === 'o') {
+        event.preventDefault()
+        fileInputRef.current?.click()
+      } else if (key === 's') {
+        event.preventDefault()
+        if (selectedFile) void saveEditedCopy()
+        else if (createModalOpen) document.querySelector('.create-modal')?.requestSubmit()
+      } else if (key === 'p') {
+        event.preventDefault()
+        openPrintPreview()
+      } else if (!isField && ['b', 'i', 'u', 'l', 'e', 'r', 'j', 'd', 'w'].includes(key)) {
+        const selection = window.getSelection()
+        const selectionInViewer = selection?.anchorNode && viewerRef.current?.contains(selection.anchorNode)
+        if (!editing || !selectionInViewer) return
+        event.preventDefault()
+        if (key === 'b' && !event.shiftKey) document.execCommand('bold')
+        if (key === 'i' && !event.shiftKey) document.execCommand('italic')
+        if (key === 'u' && !event.shiftKey) document.execCommand('underline')
+        if (key === 'l' && !event.shiftKey) document.execCommand('justifyLeft')
+        if (key === 'e' && !event.shiftKey) document.execCommand('justifyCenter')
+        if (key === 'r' && !event.shiftKey) document.execCommand('justifyRight')
+        if (key === 'j' && !event.shiftKey) document.execCommand('justifyFull')
+        if (key === 'd' && event.shiftKey) decorateSelection('double')
+        if (key === 'w' && event.shiftKey) decorateSelection('solid', true)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [editing, selectedFile, createModalOpen, findCount, openFindPanel, saveEditedCopy, openPrintPreview])
 
   return (
     <div className="app-shell">
@@ -630,9 +987,23 @@ export default function App() {
       )}
 
       <style>{`
+        .file-row { cursor: default; }
+        .file-open { display: flex; flex: 1; min-width: 0; align-items: center; gap: 9px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+        .file-open .file-info { min-width: 0; }
+        .file-open .file-info > b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-actions { position: relative; display: flex; flex: 0 0 auto; align-items: center; }
+        .file-action { width: 27px; height: 27px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
+        .file-action:hover { background: rgba(148, 163, 184, .12); color: #f1f5f9; }
+        .file-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; width: 150px; padding: 4px; border: 1px solid rgba(148, 163, 184, .2); border-radius: 5px; background: #111b2d; box-shadow: 0 10px 28px rgba(0, 0, 0, .4); }
+        .file-menu-item { width: 100%; min-height: 31px; padding: 0 9px; border: 0; border-radius: 3px; background: transparent; color: #d7e0ec; text-align: left; font-size: 11px; cursor: pointer; }
+        .file-menu-item:hover, .file-menu-item:focus-visible { background: rgba(148, 163, 184, .12); color: #fff; }
+        .file-menu-item.file-menu-delete { color: #fca5a5; }
+        .file-menu-item.file-menu-delete:hover, .file-menu-item.file-menu-delete:focus-visible { background: rgba(248, 113, 113, .12); }
+        .file-name-edit { display: flex; min-width: 0; align-items: center; gap: 2px; color: #8493a9; }
+        .file-name-edit input { width: 100%; min-width: 0; height: 23px; padding: 0 4px; border: 1px solid rgba(156, 123, 255, .45); border-radius: 3px; outline: 0; background: #0b1220; color: #e2e8f0; font: inherit; }
+        .file-name-edit > span { flex: 0 0 auto; }
         .docx-page-frame { position: relative; flex: 0 0 auto; overflow: visible; }
         .docx-page-frame > section.docx { position: absolute !important; top: 0 !important; left: 0 !important; transform-origin: top left !important; margin: 0 !important; }
-        .docx-page-frame > section.docx > .studio-title-footer { position: absolute !important; right: 20mm !important; bottom: 25mm !important; left: 20mm !important; width: auto !important; margin: 0 !important; text-align: center !important; }
         .docx-page-frame > section.docx > .studio-page-number { z-index: 5 !important; }
         .preview-pages .docx-page-frame { overflow: visible; }
         @media print {
@@ -650,10 +1021,10 @@ export default function App() {
         </div>
         <div className="side-label">ԱՇԽԱՏԱՏԱՐԱԾՔ</div>
         <nav className="section-nav" aria-label="Հիմնական ընտրացանկ">
-          <button className={activeView === 'home' ? 'nav-item active' : 'nav-item'} onClick={() => { setActiveView('home'); setMenuOpen(false) }}><Activity size={17} /> Գլխավոր վահանակ</button>
-          <button className={activeView === 'documents' ? 'nav-item active' : 'nav-item'} onClick={() => { setActiveView('documents'); setMenuOpen(false) }}><FileText size={17} /> Փաստաթղթեր <span className="nav-count">{files.length}</span></button>
-          <button className="nav-item" onClick={() => { openCreateModal(); setMenuOpen(false) }}><Pencil size={17} /> Նոր փաստաթուղթ</button>
-          <button className={activeView === 'security' ? 'nav-item active' : 'nav-item'} onClick={() => { setActiveView('security'); setMenuOpen(false) }}><ShieldCheck size={17} /> Անվտանգություն</button>
+          <button className={activeView === 'home' ? 'nav-item active' : 'nav-item'} onClick={() => { setActiveView('home'); setFileDrawerOpen(false); setMenuOpen(false) }}><Activity size={17} /> Գլխավոր վահանակ</button>
+          <button className={activeView === 'documents' ? 'nav-item active' : 'nav-item'} onClick={() => { setActiveView('documents'); setFileDrawerOpen(false); setMenuOpen(false) }}><FileText size={17} /> Փաստաթղթեր <span className="nav-count">{files.length}</span></button>
+          <button className="nav-item" onClick={() => { openCreateModal(); setFileDrawerOpen(false); setMenuOpen(false) }}><Pencil size={17} /> Նոր փաստաթուղթ</button>
+          <button className={activeView === 'security' ? 'nav-item active' : 'nav-item'} onClick={() => { setActiveView('security'); setFileDrawerOpen(false); setMenuOpen(false) }}><ShieldCheck size={17} /> Անվտանգություն</button>
         </nav>
         <div className="side-storage">
           <div className="storage-head"><span><Database size={15} /> Տեղային պահոց</span><span className="online-dot" /></div>
@@ -666,7 +1037,7 @@ export default function App() {
       <main className="main-area">
         <header className="topbar">
           <div className="topbar-leading">
-            <button className="icon-button mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Բացել ընտրացանկը"><Menu size={19} /></button>
+            <button className="icon-button mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Բացել գլխավոր ընտրացանկը" title="Գլխավոր ընտրացանկ"><Menu size={19} /></button>
             <span className="topbar-path">STUDIO <span>/</span> {activeView === 'home' ? 'ՎԱՀԱՆԱԿ' : activeView === 'documents' ? 'ՓԱՍՏԱԹՂԹԵՐ' : activeView === 'editor' ? 'ԽՄԲԱԳՐԻՉ' : 'ԱՆՎՏԱՆԳՈՒԹՅՈՒՆ'}</span>
           </div>
           <div className="topbar-actions">
@@ -716,15 +1087,72 @@ export default function App() {
 
         {activeView === 'documents' && (
           <div className="document-workspace">
-            <aside className="file-rail">
-              <div className="rail-heading"><div><p className="eyebrow">ՏԵՂԱՅԻՆ ՊԱՀՈՑ</p><h2>Փաստաթղթեր <span>{files.length}</span></h2></div><button className="icon-button accent-icon" onClick={() => fileInputRef.current?.click()} title="Ավելացնել ֆայլ"><Plus size={18} /></button></div>
+            {fileDrawerOpen && <button type="button" className="file-drawer-backdrop" aria-label="Փակել ֆայլերի ցանկը" onClick={() => setFileDrawerOpen(false)} />}
+            <aside className={`file-rail ${fileDrawerOpen ? 'file-rail-open' : ''}`} aria-hidden={!fileDrawerOpen}>
+              <div className="rail-heading"><div><p className="eyebrow">ՏԵՂԱՅԻՆ ՊԱՀՈՑ</p><h2>Փաստաթղթեր <span>{files.length}</span></h2></div><div className="rail-heading-actions"><button className="icon-button accent-icon" onClick={() => fileInputRef.current?.click()} title="Ավելացնել ֆայլ" aria-label="Ավելացնել ֆայլ"><Plus size={18} /></button><button className="icon-button file-drawer-close" onClick={() => setFileDrawerOpen(false)} title="Փակել ֆայլերի ցանկը" aria-label="Փակել ֆայլերի ցանկը"><X size={18} /></button></div></div>
               <label className="search-box"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Որոնել ֆայլերը" /></label>
-              <div className="filter-list" role="group" aria-label="Ֆայլի տեսակ"><span className="filter-caption">ՏԵՍԱԿ</span>{FILTERS.map((item) => <button key={item} className={filter === item ? 'filter-chip filter-active' : 'filter-chip'} onClick={() => setFilter(item)}>{item}<span>{item === 'Բոլորը' ? files.length : files.filter((file) => file.kind === item).length}</span></button>)}</div>
-              <div className="file-list">{visibleFiles.map((file) => <button key={file.id} className={selectedId === file.id ? 'file-row file-selected' : 'file-row'} onClick={() => setSelectedId(file.id)}><FileType kind={file.kind} /><span className="file-info"><b>{file.name}</b><small>{formatBytes(file.size)} · {new Date(file.addedAt).toLocaleDateString('hy-AM')}</small></span><span className="file-delete" role="button" tabIndex={0} title="Ջնջել ֆայլը" onClick={(event) => removeFile(event, file.id)} onKeyDown={(event) => event.key === 'Enter' && removeFile(event, file.id)}><Trash2 size={14} /></span></button>)}{visibleFiles.length === 0 && <div className="rail-empty"><FileText size={20} /><span>{files.length ? 'Համապատասխան ֆայլ չի գտնվել։' : 'Ավելացրեք առաջին փաստաթուղթը։'}</span></div>}</div>
+              <div className="category-list" aria-label="Ֆայլերի բաժիններ">
+                {FILE_CATEGORIES.map((category) => {
+                  const categoryFiles = searchedFiles.filter((file) => category.kinds.includes(file.kind))
+                  const isOpen = Boolean(openCategories[category.id])
+                  const panelId = `file-category-${category.id}`
+                  return (
+                    <section className="file-category" key={category.id}>
+                      <button className="category-toggle" type="button" aria-expanded={isOpen} aria-controls={panelId} onClick={() => setOpenCategories((current) => ({ ...current, [category.id]: !current[category.id] }))}>
+                        <span className="category-name"><ChevronDown size={14} className={isOpen ? 'category-chevron is-open' : 'category-chevron'} />{category.label}</span>
+                        <span className="category-count">{files.filter((file) => category.kinds.includes(file.kind)).length}</span>
+                      </button>
+                      {isOpen && <div className="file-list category-files" id={panelId}>
+                        {categoryFiles.map((file) => {
+                          const extensionIndex = file.name.lastIndexOf('.')
+                          const extension = extensionIndex > 0 ? file.name.slice(extensionIndex) : ''
+                          const isRenaming = renamingId === file.id
+                          return <div key={file.id} className={`file-row${selectedId === file.id ? ' file-selected' : ''}`}>
+                            <button type="button" className="file-open" onClick={() => { setSelectedId(file.id); setFileDrawerOpen(false) }} aria-label={`Բացել ${file.name}`}>
+                              <FileType kind={file.kind} />
+                              <span className="file-info">
+                                {isRenaming ? <span className="file-name-edit"><input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); saveRename(file) } else if (event.key === 'Escape') setRenamingId(null) }} aria-label="Ֆայլի անունն առանց ընդլայնման" /><span>{extension}</span></span> : <b>{file.name}</b>}
+                                <small>{formatBytes(file.size)} · {new Date(file.addedAt).toLocaleDateString('hy-AM')}</small>
+                              </span>
+                            </button>
+                            <div className="file-actions" ref={fileMenuRef}>
+                              {isRenaming ? (
+                                <button type="button" className="file-action" title="Պահպանել անունը" aria-label="Պահպանել անունը" onClick={() => saveRename(file)}><Check size={14} /></button>
+                              ) : (
+                                <button type="button" className="file-action" title="Գործողություններ" aria-label={`${file.name} գործողություններ`} aria-haspopup="menu" aria-expanded={openFileMenuId === file.id} onClick={() => setOpenFileMenuId((current) => current === file.id ? null : file.id)}><EllipsisVertical size={16} /></button>
+                              )}
+                              {openFileMenuId === file.id && !isRenaming && <div className="file-menu" role="menu">
+                                <button type="button" className="file-menu-item" role="menuitem" onClick={() => { setOpenFileMenuId(null); beginRename(file) }}>переименовать</button>
+                                <button type="button" className="file-menu-item file-menu-delete" role="menuitem" onClick={() => { setOpenFileMenuId(null); void removeFile(file.id) }}>удалить</button>
+                              </div>}
+                            </div>
+                          </div>
+                        })}
+                        {categoryFiles.length === 0 && <div className="category-empty">{search ? 'Համապատասխան ֆայլ չի գտնվել։' : 'Այս բաժինը դատարկ է։'}</div>}
+                      </div>}
+                    </section>
+                  )
+                })}
+              </div>
               <button className="button button-outline rail-upload" onClick={() => fileInputRef.current?.click()}><Upload size={15} /> Ներմուծել ֆայլեր</button>
             </aside>
             <section className="viewer-area">
-              <div className="viewer-toolbar"><div className="viewer-file-title">{!selectedFile && <span>Փաստաթուղթ ընտրված չէ</span>}</div><div className="viewer-meta">{selectedFile && <><span>{pageCount} էջ</span><span className="meta-divider" />A4</>}</div></div>
+              <div className="viewer-toolbar"><div className="viewer-file-title"><button className="icon-button viewer-rail-toggle" type="button" onClick={() => setFileDrawerOpen(true)} aria-label="Բացել ֆայլերի և բաժինների վահանակը" title="Ֆայլերի բաժիններ"><EllipsisVertical size={19} /></button></div><div className="viewer-meta">{selectedFile && <><span>{pageCount} էջ</span><span className="meta-divider" />A4<button type="button" className={`icon-button viewer-find-toggle${findOpen ? ' is-active' : ''}`} onClick={() => findOpen ? setFindOpen(false) : openFindPanel('find')} aria-label="Որոնել փաստաթղթում" title="Որոնել փաստաթղթում (Ctrl+F)"><Search size={16} /></button></>}</div></div>
+              {findOpen && selectedFile && <div className="viewer-findbar" role="search">
+                {findMode === 'goto' ? <>
+                  <label htmlFor="document-goto">Անցնել էջ</label>
+                  <input ref={findInputRef} id="document-goto" type="number" min="1" max={pageCount} value={goToPage} onChange={(event) => setGoToPage(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && navigateToPage()} />
+                  <button type="button" className="icon-button" onClick={navigateToPage} aria-label="Անցնել էջին"><ArrowRight size={15} /></button>
+                </> : <>
+                  <input ref={findInputRef} type="search" value={findQuery} onChange={(event) => { setFindQuery(event.target.value); setFindIndex(0) }} placeholder="Որոնել փաստաթղթում" aria-label="Որոնել փաստաթղթում" />
+                  <span className="viewer-find-count">{findQuery ? `${findCount ? findIndex + 1 : 0} / ${findCount}` : ''}</span>
+                  {findMode === 'replace' && <input type="text" value={replaceQuery} onChange={(event) => setReplaceQuery(event.target.value)} placeholder="Փոխարինել" aria-label="Փոխարինել տեքստը" />}
+                  {findMode === 'replace' && <button type="button" className="viewer-find-command" onClick={replaceAllMatches}>Փոխարինել բոլորը</button>}
+                  <button type="button" className="icon-button" onClick={() => moveFindResult(-1)} disabled={!findCount} aria-label="Նախորդ արդյունքը" title="Նախորդ արդյունքը"><ChevronUp size={16} /></button>
+                  <button type="button" className="icon-button" onClick={() => moveFindResult(1)} disabled={!findCount} aria-label="Հաջորդ արդյունքը" title="Հաջորդ արդյունքը"><ChevronDown size={16} /></button>
+                </>}
+                <button type="button" className="icon-button" onClick={() => setFindOpen(false)} aria-label="Փակել որոնումը"><X size={15} /></button>
+              </div>}
               <div className="paper-stage">
                 {!selectedFile && <div className="viewer-empty"><span className="empty-icon"><FileText size={23} /></span><h2>Ընտրեք փաստաթուղթը</h2><p>Ձեր տեղային ֆայլերը հասանելի են միայն այս սարքում։</p><button className="button button-primary" onClick={() => fileInputRef.current?.click()}><Upload size={15} /> Բացել ֆայլ</button></div>}
                 {busy && <div className="loading-indicator"><span className="spinner" /> Փաստաթուղթը մշակվում է…</div>}
@@ -758,7 +1186,36 @@ export default function App() {
 
       {previewOpen && (
         <div className="preview-overlay" role="dialog" aria-modal="true" aria-labelledby="preview-title" onMouseDown={(event) => event.target === event.currentTarget && setPreviewOpen(false)}>
-          <section className="preview-modal"><header className="preview-header"><div><p className="eyebrow">ՏՊՄԱՆ ՆԱԽԱԴԻՏՈՒՄ</p><h2 id="preview-title">{selectedFile?.name}</h2><span className="preview-count">{pageCount} էջ <b>•</b> A4</span></div><button className="icon-button" onClick={() => setPreviewOpen(false)} aria-label="Փակել նախադիտումը"><X size={19} /></button></header><div className="preview-scroll"><div ref={previewRef} className="preview-pages" /></div><footer className="preview-actions"><span>Բրաուզերի տպման պատուհանում ընտրեք «Save as PDF»՝ PDF ստանալու համար։</span><div><button className="button button-quiet" onClick={() => setPreviewOpen(false)}>Փակել</button><button className="button button-primary" onClick={printDocument}><Printer size={15} /> Տպել</button></div></footer></section>
+          <section className="preview-modal">
+            <header className="preview-header"><div><p className="eyebrow">ՏՊՄԱՆ ՆԱԽԱԴԻՏՈՒՄ</p><h2 id="preview-title">{selectedFile?.name}</h2><span className="preview-count">{pageCount} էջ <b>•</b> {PAPER_SIZES[paperSize].label}</span></div><button className="icon-button" onClick={() => setPreviewOpen(false)} aria-label="Փակել նախադիտումը"><X size={19} /></button></header>
+            <div className="preview-layout">
+              <main className="preview-paper-area">
+                <div className="preview-scroll"><div ref={previewRef} className="preview-pages" /></div>
+                <nav className="preview-pagination" aria-label="Էջերի նավարկում">
+                  <button type="button" className="icon-button" onClick={() => changePreviewPage(-1)} disabled={previewPage <= 1} aria-label="Նախորդ էջ"><ChevronLeft size={17} /></button>
+                  <span><b>{previewPage}</b> / {pageCount}</span>
+                  <button type="button" className="icon-button" onClick={() => changePreviewPage(1)} disabled={previewPage >= pageCount} aria-label="Հաջորդ էջ"><ChevronRight size={17} /></button>
+                </nav>
+              </main>
+              <aside className="print-settings" aria-label="Տպման կարգավորումներ">
+                <h3>Տպման կարգավորումներ</h3>
+                <label>Օրինակների քանակ
+                  <input type="number" min="1" max="99" value={copies} onChange={(event) => setCopies(event.target.value)} />
+                </label>
+                <label>Էջեր
+                  <input type="text" value={pageRange} onChange={(event) => setPageRange(event.target.value)} placeholder="բոլորը կամ 1-5" aria-describedby="page-range-help" />
+                  <small id="page-range-help">Օրինակ՝ բոլորը, 1-5 կամ 1,3,5</small>
+                </label>
+                <label>Թղթի չափ
+                  <select value={paperSize} onChange={(event) => setPaperSize(event.target.value)}>
+                    {Object.values(PAPER_SIZES).map((size) => <option key={size.label} value={size.label}>{size.label}</option>)}
+                  </select>
+                </label>
+                <div className="print-settings-summary"><span>Տպվող էջեր</span><b>{parsePageRange(pageRange, pageCount)?.length ?? '—'}</b></div>
+              </aside>
+            </div>
+            <footer className="preview-actions"><span>Տպման պատուհանում ընտրեք «Save as PDF»՝ PDF պահպանելու համար։</span><div><button className="button button-quiet" onClick={() => setPreviewOpen(false)}>Փակել</button><button className="button button-primary" onClick={printDocument}><Printer size={15} /> Տպել</button></div></footer>
+          </section>
         </div>
       )}
     </div>
@@ -798,7 +1255,7 @@ function paginateDocxPages(container) {
   sourcePages.forEach((page) => page.remove())
   const renderedPages = []
 
-  for (const [sourcePageIndex, sourcePage] of sourcePages.entries()) {
+  for (const sourcePage of sourcePages) {
     const articles = [...sourcePage.children].filter((child) => child.tagName === 'ARTICLE')
     if (!articles.length) {
       wrapper.append(sourcePage)
@@ -807,16 +1264,7 @@ function paginateDocxPages(container) {
     }
 
     for (const sourceArticle of articles) {
-      let titleBlock = null
-      const blocks = [...sourceArticle.children].filter((block) => {
-        const titleText = block.textContent.replace(/\s+/g, ' ').trim()
-        if (sourcePageIndex === 0 && !titleBlock && /^գյումրի\s+2026$/iu.test(titleText)) {
-          titleBlock = block
-          return false
-        }
-        return true
-      })
-      const firstRenderedPageIndex = renderedPages.length
+      const blocks = [...sourceArticle.children]
       let page
       let frame
       let article
@@ -879,13 +1327,6 @@ function paginateDocxPages(container) {
       }
       renderedPages.push(page)
 
-      if (titleBlock && renderedPages[firstRenderedPageIndex]) {
-        const title = titleBlock.cloneNode(true)
-        title.classList.add('studio-title-footer')
-        title.querySelectorAll('*').forEach((element) => element.style.setProperty('color', '#111827', 'important'))
-        title.style.setProperty('color', '#111827', 'important')
-        renderedPages[firstRenderedPageIndex].append(title)
-      }
     }
   }
 
@@ -898,7 +1339,7 @@ function paginateDocxPages(container) {
   })
 
   const scaleFrames = () => {
-    const scale = Math.min(1, container.clientWidth / (210 * 96 / 25.4))
+    const scale = Math.min(56 * 16 / (210 * 96 / 25.4), container.clientWidth / (210 * 96 / 25.4))
     for (const page of renderedPages) {
       const frame = page.parentElement
       frame.style.width = `${210 * 96 / 25.4 * scale}px`
@@ -932,7 +1373,8 @@ function renderTextPages(text) {
   const pageWidth = 1240
   const pageHeight = 1754
   const margin = 118
-  const lineHeight = 38
+  const fontSize = 26
+  const lineHeight = fontSize * 1.5
   const bottom = pageHeight - margin - 80
   const pages = []
   let canvas
@@ -947,7 +1389,7 @@ function renderTextPages(text) {
     context.fillStyle = '#ffffff'
     context.fillRect(0, 0, pageWidth, pageHeight)
     context.fillStyle = '#111827'
-    context.font = '26px Arial, "Noto Sans Armenian", sans-serif'
+    context.font = `${fontSize}px Arial, "Noto Sans Armenian", sans-serif`
     y = margin + 18
     pages.push(canvas)
   }
