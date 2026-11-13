@@ -1,30 +1,45 @@
 import React from 'react'
 import {
-  Activity, ArrowRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, EllipsisVertical,
-  Cpu, Database, FileSpreadsheet, FileText, HardDrive, LockKeyhole, Menu, Pencil,
-  Plus, Printer, Search, ShieldCheck, Sparkles, Upload, X
+  Activity, Ellipsis, FilePlus2, FileText, Menu, Printer, ShieldCheck, Sparkles, Upload, X
 } from 'lucide-react'
+import { CreateDocumentModal } from './CreateDocumentModal'
 
 export function MobileStudio({
   files, selectedId, setSelectedId, activeView, setActiveView, search, setSearch,
-  busy, message, setMessage, pageCount, editing, toggleEditing, saveEditedCopy,
+  busy, message, setMessage, pageCount, editing, toggleEditing,
   openPrintPreview, closeSelectedFile, fileInputRef, handleUpload, viewerRef,
   fileDrawerOpen, setFileDrawerOpen, menuOpen, setMenuOpen, formatBytes,
-  FILE_CATEGORIES, openCategories, setOpenCategories, resourceMemory
+  FILE_CATEGORIES, openCategories, setOpenCategories, resourceMemory, createModalOpen, setCreateModalOpen,
+  createDocument, newDocTitle, setNewDocTitle, newDocText, setNewDocText,
+  newDocFormat, setNewDocFormat, newDocOutputFormat, setNewDocOutputFormat, PAPER_SIZES,
+  formatMenuOpen, setFormatMenuOpen, fileCategory, setFileCategory
 }) {
   return (
     <div className="mobile-studio-wrapper" style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100vh', overflow: 'hidden' }}>
       <header className="topbar" style={{ padding: '0 12px', height: '56px' }}>
         <div className="topbar-leading" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button className="icon-button" onClick={() => setMenuOpen(true)} aria-label="Մենյու"><Menu size={20} /></button>
-          <span className="topbar-path" style={{ fontSize: '13px' }}><b>MOBILE</b> / {activeView.toUpperCase()}</span>
+          {activeView === 'documents' ? <div className="format-menu-anchor">
+            <button className="icon-button format-menu-trigger" onClick={() => setFormatMenuOpen(!formatMenuOpen)} aria-label="Ֆայլերի ձևաչափեր" aria-expanded={formatMenuOpen}><Ellipsis size={20} /></button>
+            {formatMenuOpen && <div className="format-menu" role="menu">
+              <p>Ֆայլերի ձևաչափեր</p>
+              <button role="menuitem" onClick={() => { setFileCategory('all'); setFileDrawerOpen(true); setMenuOpen(false); setFormatMenuOpen(false) }}><span>Բոլոր ձևաչափերը</span><small>{files.length}</small></button>
+              {FILE_CATEGORIES.map((category) => <button key={category.id} role="menuitem" onClick={() => { setFileCategory(category.id); setFileDrawerOpen(true); setMenuOpen(false); setFormatMenuOpen(false) }}><span>{category.label}</span><small>{files.filter((file) => category.kinds.includes(file.kind)).length}</small></button>)}
+            </div>}
+            <span className="studio-wordmark">Offline Studio</span>
+          </div> : <span className="topbar-path" style={{ fontSize: '13px' }}><b>MOBILE</b> / {activeView.toUpperCase()}</span>}
         </div>
         <div className="topbar-actions">
           {activeView === 'documents' && selectedId && (
-            <button className="button button-primary compact-button" onClick={openPrintPreview}><Printer size={14} /></button>
+            <>
+              <button className={`button ${editing ? 'button-primary icon-only' : 'button-quiet'}`} onClick={toggleEditing} title={editing ? 'Ավարտել խմբագրումը' : 'Խմբագրել'} aria-label={editing ? 'Ավարտել խմբագրումը' : 'Խմբագրել'}>{editing ? <X size={16} /> : <><FileText size={14} /><span>Խմբագրել</span></>}</button>
+              <button className="button button-primary compact-button" onClick={openPrintPreview}><Printer size={14} /></button>
+            </>
           )}
-          <button className="button button-quiet" onClick={() => fileInputRef.current?.click()}><Upload size={14} /></button>
-          <input ref={fileInputRef} className="visually-hidden" type="file" multiple accept=".docx,.doc,.pdf,.xlsx,.xls,.csv,.txt,.rtf,.png" onChange={handleUpload} />
+          {activeView === 'documents' && <>
+            <button className="button button-quiet" onClick={() => fileInputRef.current?.click()} aria-label="Բացել ֆայլ"><Upload size={14} /></button>
+            <input ref={fileInputRef} className="visually-hidden" type="file" multiple accept=".docx,.doc,.pdf,.xlsx,.xls,.csv,.txt,.rtf,.png,.jpg,.jpeg" onChange={handleUpload} />
+          </>}
         </div>
       </header>
 
@@ -37,6 +52,7 @@ export function MobileStudio({
             </div>
             <button className="nav-item" onClick={() => { setActiveView('home'); setMenuOpen(false) }}><Activity size={16} /> Գլխավոր</button>
             <button className="nav-item" onClick={() => { setActiveView('documents'); setMenuOpen(false); setFileDrawerOpen(true) }}><FileText size={16} /> Փաստաթղթեր ({files.length})</button>
+            {activeView !== 'home' && <button className="nav-item" onClick={() => { setCreateModalOpen(true); setMenuOpen(false) }}><FilePlus2 size={16} /> Նոր փաստաթուղթ</button>}
             <button className="nav-item" onClick={() => { setActiveView('security'); setMenuOpen(false) }}><ShieldCheck size={16} /> Անվտանգություն</button>
           </div>
         </div>
@@ -46,12 +62,24 @@ export function MobileStudio({
 
       <main style={{ flex: 1, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}>
         {activeView === 'home' && (
-          <div style={{ padding: '16px' }}>
-            <h2 style={{ color: '#fff', fontSize: '20px', marginBottom: '8px' }}>Մոբայլ աշխատատարածք PWA</h2>
-            <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '20px' }}>Դիտեք ձեր փաստաթղթերը անմիջապես հեռախոսից։</p>
-            <button className="button button-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={() => { setActiveView('documents'); setFileDrawerOpen(true) }}>
-              Բացել փաստաթղթերը <ArrowRight size={16} />
-            </button>
+          <div className="welcome-page">
+            <section className="welcome-stage">
+              <div className="welcome-copy-block">
+                <p className="eyebrow">ԱՆՑԱՆՑԻՑ ԱՆԿԱԽ ՓԱՍՏԱԹՂԹԱՅԻՆ ՍՏՈՒԴԻԱ</p>
+                <h1>Աշխատեք ձեր փաստաթղթերի հետ՝ <span>ձեր պայմաններով։</span></h1>
+                <p>Offline Studio-ն մեկ հանգիստ և անվտանգ միջավայր է՝ փաստաթղթեր դիտելու, խմբագրելու և ստեղծելու համար։ Ձեր աշխատանքային ֆայլերը մնում են այս սարքում և հասանելի են նաև առանց ինտերնետի։</p>
+              </div>
+              <div className="welcome-visual" aria-hidden="true">
+                <div className="welcome-paper welcome-paper-back"><i /><i /><i /></div>
+                <div className="welcome-paper welcome-paper-front"><span className="welcome-paper-mark"><Sparkles size={18} /></span><b>Offline<br />Studio</b><i /><i /><i /></div>
+                <div className="welcome-format format-word">WORD</div><div className="welcome-format format-pdf">PDF</div><div className="welcome-format format-sheet">XLS</div>
+              </div>
+            </section>
+            <section className="welcome-values" aria-label="Offline Studio-ի առանձնահատկությունները">
+              <article><span>01</span><div><h2>Տեղային պահոց</h2><p>Ֆայլերը պահպանվում են ձեր սարքում՝ առանց ամպային փոխանցման։</p></div></article>
+              <article><span>02</span><div><h2>Միասնական աշխատատարածք</h2><p>Word, PDF, Excel և պատկերներ՝ մեկ ընթեռնելի միջավայրում։</p></div></article>
+              <article><span>03</span><div><h2>Պատրաստ՝ անցանց աշխատանքի</h2><p>Բացեք և կառավարեք ձեր ֆայլերը՝ նույնիսկ առանց ցանցային կապի։</p></div></article>
+            </section>
           </div>
         )}
 
@@ -80,7 +108,7 @@ export function MobileStudio({
                 <button className="icon-button" onClick={() => setFileDrawerOpen(false)}><X size={18} /></button>
               </div>
               <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {files.map((file) => (
+                {files.filter((file) => fileCategory === 'all' || FILE_CATEGORIES.find((category) => category.id === fileCategory)?.kinds.includes(file.kind)).map((file) => (
                   <button key={file.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px', background: '#111b2d', border: 0, borderRadius: '8px', color: '#fff', textAlign: 'left' }} onClick={() => { setSelectedId(file.id); setFileDrawerOpen(false); setActiveView('documents') }}>
                     <FileText size={18} color="#90cdf4" />
                     <div style={{ overflow: 'hidden' }}>
@@ -94,6 +122,9 @@ export function MobileStudio({
           </div>
         )}
       </main>
+      <CreateDocumentModal open={createModalOpen} onClose={() => setCreateModalOpen(false)} onCreate={createDocument}
+        title={newDocTitle} setTitle={setNewDocTitle} text={newDocText} setText={setNewDocText}
+        paperFormat={newDocFormat} setPaperFormat={setNewDocFormat} outputFormat={newDocOutputFormat} setOutputFormat={setNewDocOutputFormat} paperSizes={PAPER_SIZES} creating={busy} />
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { DesktopStudio } from './components/DesktopStudio'
 import { MobileStudio } from './components/MobileStudio'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
+import './home.css'
 import './responsive.css'
 
 const DB_NAME = 'offline-studio-v10'
@@ -13,12 +14,22 @@ const FILE_CATEGORIES = [
   { id: 'Word', label: 'Word', kinds: ['Word'] },
   { id: 'PDF', label: 'PDF', kinds: ['PDF'] },
   { id: 'Excel', label: 'Excel', kinds: ['Excel'] },
-  { id: 'other', label: 'Այլ փաստաթղթեր', kinds: ['Փաստաթուղթ', 'PNG'] },
+  { id: 'Images', label: 'Պատկերներ', kinds: ['JPG', 'PNG'] },
+  { id: 'other', label: 'Այլ փաստաթղթեր', kinds: ['Փաստաթուղթ'] },
 ]
 const PAPER_SIZES = {
+  A0: { label: 'A0', width: 841, height: 1189 },
+  A1: { label: 'A1', width: 594, height: 841 },
+  A2: { label: 'A2', width: 420, height: 594 },
+  A3: { label: 'A3', width: 297, height: 420 },
   A4: { label: 'A4', width: 210, height: 297 },
+  A5: { label: 'A5', width: 148, height: 210 },
+  A6: { label: 'A6', width: 105, height: 148 },
+  B5: { label: 'B5', width: 176, height: 250 },
   Letter: { label: 'Letter', width: 216, height: 279 },
   Legal: { label: 'Legal', width: 216, height: 356 },
+  Tabloid: { label: 'Tabloid', width: 279, height: 432 },
+  Executive: { label: 'Executive', width: 184, height: 267 },
 }
 
 function parsePageRange(value, pageCount) {
@@ -75,7 +86,8 @@ const removeConfig = (key) => storeRequest(CONFIG_STORE, 'readwrite', (store) =>
 function classifyFile(file) {
   const ext = file.name.split('.').pop()?.toLowerCase()
   if (ext === 'pdf') return 'PDF'
-  if (ext === 'png') return 'PNG'
+  if (['png'].includes(ext)) return 'PNG'
+  if (['jpg', 'jpeg'].includes(ext)) return 'JPG'
   if (['docx', 'doc'].includes(ext)) return 'Word'
   if (['xlsx', 'xls'].includes(ext)) return 'Excel'
   return 'Փաստաթուղթ'
@@ -310,8 +322,11 @@ export default function App() {
   const [textContent, setTextContent] = useState('')
   const [newDocTitle, setNewDocTitle] = useState('')
   const [newDocText, setNewDocText] = useState('')
-  const [newDocFormat, setNewDocFormat] = useState('docx')
+  const [newDocFormat, setNewDocFormat] = useState('A4')
+  const [newDocOutputFormat, setNewDocOutputFormat] = useState('docx')
   const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [formatMenuOpen, setFormatMenuOpen] = useState(false)
+  const [fileCategory, setFileCategory] = useState('all')
   const [findOpen, setFindOpen] = useState(false)
   const [findMode, setFindMode] = useState('find')
   const [findQuery, setFindQuery] = useState('')
@@ -382,7 +397,7 @@ export default function App() {
         if (!record || cancelled) return
         const fileUrl = await getFileUrl(record)
         if (!fileUrl) return
-        const effectiveKind = record.type === 'image/png' ? 'PNG' : record.kind
+        const effectiveKind = record.type?.startsWith('image/') ? (record.type === 'image/png' ? 'PNG' : 'JPG') : record.kind
         setBusy(true)
         setEditing(false)
         setPageCount(1)
@@ -427,6 +442,15 @@ export default function App() {
             sheet.append(canvas)
             viewerRef.current.append(sheet)
           }
+        } else if (kind === 'PNG' || kind === 'JPG') {
+          const sheet = document.createElement('section')
+          sheet.className = 'image-page paper-page'
+          const image = document.createElement('img')
+          image.className = 'generated-image'
+          image.src = fileUrl
+          image.alt = record.name
+          sheet.append(image)
+          viewerRef.current?.replaceChildren(sheet)
         } else if (kind === 'Excel') {
           const response = await fetch(fileUrl)
           const buffer = await response.arrayBuffer()
@@ -460,6 +484,14 @@ export default function App() {
     return () => { cancelled = true; pageResizeObserver?.disconnect() }
   }, [selectedId, isMobileDevice])
 
+  useEffect(() => {
+    const editablePages = viewerRef.current?.querySelectorAll('.text-page article, .docx-wrapper > section.docx, .spreadsheet-page')
+    editablePages?.forEach((page) => {
+      page.setAttribute('contenteditable', String(editing))
+      page.setAttribute('spellcheck', 'true')
+    })
+  }, [editing, selectedId, busy])
+
   const handleUpload = async (event) => {
     const input = event.currentTarget
     const incoming = [...(input.files || [])]
@@ -473,6 +505,7 @@ export default function App() {
         setSelectedId(record.id)
       }
       await refreshFiles()
+      setFileCategory('all')
       setActiveView('documents')
     } finally {
       setBusy(false)
@@ -480,11 +513,104 @@ export default function App() {
     }
   }
 
-  const saveEditedCopy = useCallback(() => { }, [])
   const openPrintPreview = () => setPreviewOpen(true)
   const closeSelectedFile = () => setSelectedId(null)
   const openCreateModal = () => setCreateModalOpen(true)
-  const createDocument = () => { }
+  const createDocument = async (event) => {
+    event.preventDefault()
+    setBusy(true)
+    try {
+    const pageSize = PAPER_SIZES[newDocFormat] || PAPER_SIZES.A4
+    const title = (newDocTitle.trim() || 'Անվերնագիր').replace(/[\\/:*?"<>|]/g, '-')
+    const outputFormats = {
+      docx: { extension: 'docx', kind: 'Word', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      pdf: { extension: 'pdf', kind: 'PDF', type: 'application/pdf' },
+      jpg: { extension: 'jpg', kind: 'JPG', type: 'image/jpeg' },
+      png: { extension: 'png', kind: 'PNG', type: 'image/png' },
+      txt: { extension: 'txt', kind: 'Փաստաթուղթ', type: 'text/plain' },
+    }
+    const output = outputFormats[newDocOutputFormat] || outputFormats.docx
+    let blob
+
+    if (newDocOutputFormat === 'docx') {
+      const { Document, Packer, Paragraph } = await import('docx')
+      const document = new Document({
+        sections: [{
+          properties: { page: { size: { width: Math.round((pageSize.width / 25.4) * 1440), height: Math.round((pageSize.height / 25.4) * 1440), orientation: 'portrait' } } },
+          children: (newDocText || '').split(/\r?\n/).map((line) => new Paragraph({ text: line })),
+        }],
+      })
+      blob = await Packer.toBlob(document)
+    } else if (newDocOutputFormat === 'txt') {
+      blob = new Blob([newDocText || ''], { type: output.type })
+    } else {
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round((pageSize.width / 25.4) * 96)
+      canvas.height = Math.round((pageSize.height / 25.4) * 96)
+      const context = canvas.getContext('2d')
+      context.fillStyle = '#ffffff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.fillStyle = '#17212b'
+      context.textBaseline = 'top'
+      const margin = Math.round(canvas.width * 0.095)
+      const titleFontSize = Math.max(20, Math.round(canvas.width * 0.025))
+      const bodyFontSize = Math.max(16, Math.round(canvas.width * 0.017))
+      context.font = `600 ${titleFontSize}px Arial, "Noto Sans Armenian", sans-serif`
+      context.fillText(title, margin, margin)
+      context.font = `${bodyFontSize}px Arial, "Noto Sans Armenian", sans-serif`
+      const lineHeight = Math.round(bodyFontSize * 1.55)
+      const maxWidth = canvas.width - margin * 2
+      let y = margin + titleFontSize + lineHeight
+      for (const paragraph of (newDocText || '').split(/\r?\n/)) {
+        let line = ''
+        for (const word of paragraph.split(/\s+/)) {
+          const nextLine = line ? `${line} ${word}` : word
+          if (context.measureText(nextLine).width > maxWidth && line) {
+            if (y + lineHeight > canvas.height - margin) break
+            context.fillText(line, margin, y)
+            y += lineHeight
+            line = word
+          } else line = nextLine
+        }
+        if (y + lineHeight > canvas.height - margin) break
+        context.fillText(line, margin, y)
+        y += lineHeight
+        if (y + lineHeight > canvas.height - margin) break
+      }
+
+      if (newDocOutputFormat === 'pdf') {
+        const { PDFDocument } = await import('pdf-lib')
+        const pdf = await PDFDocument.create()
+        const pngBytes = await (await fetch(canvas.toDataURL('image/png'))).arrayBuffer()
+        const image = await pdf.embedPng(pngBytes)
+        const page = pdf.addPage([pageSize.width / 25.4 * 72, pageSize.height / 25.4 * 72])
+        page.drawImage(image, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() })
+        blob = new Blob([await pdf.save()], { type: output.type })
+      } else {
+        blob = await new Promise((resolve, reject) => canvas.toBlob((result) => result ? resolve(result) : reject(new Error('Պատկերը չհաջողվեց ստեղծել։')), output.type, 0.92))
+      }
+    }
+
+    const record = {
+      id: crypto.randomUUID(), name: `${title}.${output.extension}`, kind: output.kind, size: blob.size,
+      type: output.type, addedAt: Date.now(), blob, paperSize: newDocFormat, orientation: 'portrait',
+    }
+    saveFileRecord(record)
+    await refreshFiles()
+    setFileCategory('all')
+    setSelectedId(record.id)
+    setActiveView('documents')
+    setCreateModalOpen(false)
+    setNewDocTitle('')
+    setNewDocText('')
+    setNewDocOutputFormat('docx')
+    } catch (error) {
+      console.error(error)
+      setMessage('Փաստաթուղթը չհաջողվեց ստեղծել։')
+    } finally {
+      setBusy(false)
+    }
+  }
   const createPin = () => { }
   const unlock = () => { }
   const removePin = () => { }
@@ -504,13 +630,18 @@ export default function App() {
         files={files} selectedId={selectedId} setSelectedId={setSelectedId}
         activeView={activeView} setActiveView={setActiveView} search={search} setSearch={setSearch}
         busy={busy} message={message} setMessage={setMessage} pageCount={pageCount}
-        editing={editing} toggleEditing={toggleEditing} saveEditedCopy={saveEditedCopy}
+        editing={editing} toggleEditing={toggleEditing}
         openPrintPreview={openPrintPreview} closeSelectedFile={closeSelectedFile}
         fileInputRef={fileInputRef} handleUpload={handleUpload} viewerRef={viewerRef}
         fileDrawerOpen={fileDrawerOpen} setFileDrawerOpen={setFileDrawerOpen}
         menuOpen={menuOpen} setMenuOpen={setMenuOpen} formatBytes={formatBytes}
         FILE_CATEGORIES={FILE_CATEGORIES} openCategories={openCategories}
         setOpenCategories={setOpenCategories} resourceMemory={resourceMemory}
+        formatMenuOpen={formatMenuOpen} setFormatMenuOpen={setFormatMenuOpen} fileCategory={fileCategory} setFileCategory={setFileCategory}
+        createModalOpen={createModalOpen} setCreateModalOpen={setCreateModalOpen}
+        createDocument={createDocument} newDocTitle={newDocTitle} setNewDocTitle={setNewDocTitle} newDocText={newDocText}
+        setNewDocText={setNewDocText} newDocFormat={newDocFormat} setNewDocFormat={setNewDocFormat}
+        newDocOutputFormat={newDocOutputFormat} setNewDocOutputFormat={setNewDocOutputFormat} PAPER_SIZES={PAPER_SIZES}
       />
     )
   }
@@ -520,7 +651,7 @@ export default function App() {
       files={files} selectedId={selectedId} setSelectedId={setSelectedId}
       activeView={activeView} setActiveView={setActiveView} search={search} setSearch={setSearch}
       busy={busy} message={message} setMessage={setMessage} pageCount={pageCount}
-      editing={editing} toggleEditing={toggleEditing} saveEditedCopy={saveEditedCopy}
+      editing={editing} toggleEditing={toggleEditing}
       openPrintPreview={openPrintPreview} closeSelectedFile={closeSelectedFile}
       fileInputRef={fileInputRef} handleUpload={handleUpload} viewerRef={viewerRef}
       findOpen={findOpen} setFindOpen={setFindOpen} findMode={findMode} openFindPanel={openFindPanel}
@@ -533,10 +664,12 @@ export default function App() {
       createModalOpen={createModalOpen} setCreateModalOpen={setCreateModalOpen} openCreateModal={openCreateModal}
       createDocument={createDocument} newDocTitle={newDocTitle} setNewDocTitle={setNewDocTitle} newDocText={newDocText}
       setNewDocText={setNewDocText} newDocFormat={newDocFormat} setNewDocFormat={setNewDocFormat}
+      newDocOutputFormat={newDocOutputFormat} setNewDocOutputFormat={setNewDocOutputFormat}
       pinHash={pinHash} createPin={createPin} unlock={unlock} removePin={removePin} pinInput={pinInput}
       setPinInput={setPinInput} pinSetup={pinSetup} setPinSetup={setPinSetup} resourceMemory={resourceMemory}
       formatBytes={formatBytes} FILE_CATEGORIES={FILE_CATEGORIES} PAPER_SIZES={PAPER_SIZES}
       openCategories={openCategories} setOpenCategories={setOpenCategories} renamingId={renamingId}
+      formatMenuOpen={formatMenuOpen} setFormatMenuOpen={setFormatMenuOpen} fileCategory={fileCategory} setFileCategory={setFileCategory}
       renameValue={renameValue} setRenameValue={setRenameValue} saveRename={saveRename} removeFile={removeFile}
       openFileMenuId={openFileMenuId} setOpenFileMenuId={setOpenFileMenuId} fileMenuRef={fileMenuRef}
     />
